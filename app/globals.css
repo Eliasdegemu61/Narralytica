@@ -1,0 +1,129 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* ── Surfaces ── */
+  --background:     oklch(0.055 0 0);       /* #080808  */
+  --surface:        oklch(0.085 0 0);       /* #0f0f0f  */
+  --surface-2:      oklch(0.11 0 0);        /* #161616  */
+  --surface-3:      oklch(0.135 0 0);       /* #1c1c1c  */
+
+  /* ── Borders ── */
+  --border-subtle:  oklch(0.13 0 0);        /* #1a1a1a  */
+  --border:         oklch(0.18 0 0);        /* #252525  */
+  --border-bright:  oklch(0.28 0 0);        /* #3a3a3a  */
+
+  /* ── Typography ── */
+  --foreground:       oklch(0.94 0 0);      /* #f0f0f0  */
+  --foreground-muted: oklch(0.58 0 0);      /* #808080  */
+  --foreground-dim:   oklch(0.38 0 0);      /* #505050  */
+  --foreground-faint: oklch(0.24 0 0);      /* #2e2e2e  */
+
+  /* ── Signal — vivid & clear ── */
+  --bull:            oklch(0.72 0.19 145);  /* #22c55e  */
+  --bull-dim:        oklch(0.55 0.15 145);
+  --bull-track:      oklch(0.14 0.04 145);  /* very dark green */
+  --bear:            oklch(0.62 0.22 25);   /* #ef4444  */
+  --bear-dim:        oklch(0.50 0.18 25);
+  --bear-track:      oklch(0.14 0.06 25);   /* very dark red */
+  --neutral-fg:      oklch(0.65 0.22 250);  /* electric blue */
+  --neutral-track:   oklch(0.12 0.05 250);  /* very dark blue */
+
+  /* ── Accent — electric blue ── */
+  --accent:          oklch(0.65 0.22 250);  /* #3b82f6  */
+  --accent-dim:      oklch(0.50 0.16 250);
+  --accent-track:    oklch(0.12 0.05 250);
+
+  /* ── shadcn compat ── */
+  --accent-blue:              var(--accent);
+  --accent-blue-track:        var(--accent-track);
+  --card:                     var(--surface);
+  --card-foreground:          var(--foreground);
+  --popover:                  var(--surface-2);
+  --popover-foreground:       var(--foreground);
+  --primary:                  var(--foreground);
+  --primary-foreground:       var(--background);
+  --secondary:                var(--surface-2);
+  --secondary-foreground:     var(--foreground);
+  --muted:                    var(--surface-2);
+  --muted-foreground:         var(--foreground-muted);
+  --destructive:              var(--bear);
+  --destructive-foreground:   oklch(0.96 0 0);
+  --input:                    var(--border);
+  --ring:                     var(--accent);
+  --radius:                   0rem;
+
+  /* ── Charts ── */
+  --chart-1: var(--bull);
+  --chart-2: var(--bear);
+  --chart-3: var(--accent);
+  --chart-4: oklch(0.78 0.14 75);
+  --chart-5: oklch(0.60 0.12 290);
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), 'Inter', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), 'JetBrains Mono', 'Fira Code', monospace;
+
+  --color-background:    var(--background);
+  --color-surface:       var(--surface);
+  --color-surface-2:     var(--surface-2);
+  --color-surface-3:     var(--surface-3);
+  --color-foreground:    var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-foreground-dim:   var(--foreground-dim);
+  --color-foreground-faint: var(--foreground-faint);
+
+  --color-bull:          var(--bull);
+  --color-bull-dim:      var(--bull-dim);
+  --color-bull-track:    var(--bull-track);
+  --color-bear:          var(--bear);
+  --color-bear-dim:      var(--bear-dim);
+  --color-bear-track:    var(--bear-track);
+  --color-neutral-fg:    var(--neutral-fg);
+
+  --color-accent:        var(--accent);
+  --color-accent-blue:   var(--accent);
+  --color-accent-dim:    var(--accent-dim);
+  --color-accent-track:  var(--accent-track);
+  --color-accent-blue-track: var(--accent-track);
+
+  --color-card:               var(--card);
+  --color-card-foreground:    var(--card-foreground);
+  --color-popover:            var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary:             var(--primary);
+  --color-primary-foreground:  var(--primary-foreground);
+  --color-secondary:           var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:               var(--muted);
+  --color-muted-foreground:    var(--muted-foreground);
+  --color-accent-foreground:   var(--foreground);
+  --color-destructive:         var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:              var(--border);
+  --color-input:               var(--input);
+  --color-ring:                var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: 0rem;
+  --radius-md: 0rem;
+  --radius-lg: 0rem;
+  --radius-xl: 0rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "tnum", "ss01", "cv01";
+  }
+}
