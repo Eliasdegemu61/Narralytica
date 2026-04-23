@@ -16,6 +16,20 @@ import { formatPrice } from "@/lib/format";
 
 const B = "var(--border-subtle)";
 
+const TRADE_KLINE_CONFIG: Partial<Record<string, { base: string; hasStartTime: boolean }>> = {
+  BTC:  { base: "https://mainnet-gw.sodex.dev/futures/fapi/market/v1/public/q/kline?symbol=BTC-USD", hasStartTime: true },
+  ETH:  { base: "https://mainnet-gw.sodex.dev/futures/fapi/market/v1/public/q/kline?symbol=ETH-USD", hasStartTime: true },
+  DOGE: { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vDOGE_vUSDC", hasStartTime: true },
+  ADA:  { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vADA_vUSDC", hasStartTime: true },
+  SOL:  { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vSOL_vUSDC", hasStartTime: true },
+  SUI:  { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vSUI_vUSDC", hasStartTime: false },
+  BNB:  { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vBNB_vUSDC", hasStartTime: true },
+  LINK: { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vLINK_vUSDC", hasStartTime: false },
+  XRP:  { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vXRP_vUSDC", hasStartTime: true },
+  AVAX: { base: "https://mainnet-gw.sodex.dev/pro/p/quotation/kline?symbol=vAVAX_vUSDC", hasStartTime: false },
+  HBAR: { base: "https://mainnet-gw.sodex.dev/futures/fapi/market/v1/public/q/kline?symbol=HBAR-USD", hasStartTime: false },
+};
+
 type RadarMetric = {
   name: string;
   short: string;
@@ -88,6 +102,217 @@ function actionMarket(action: string) {
     default:
       return "None";
   }
+}
+
+function tradeTargetPercent(action: string) {
+  switch (action) {
+    case "perps_long":
+    case "spot_long":
+      return 0.001;
+    case "perps_short":
+      return -0.001;
+    default:
+      return 0;
+  }
+}
+
+function tradeFeeRate(action: string) {
+  return action === "spot_long" ? 0.002 : action === "wait" ? 0 : 0.00024;
+}
+
+function tradeLeverage(action: string) {
+  return action === "perps_long" || action === "perps_short" ? 5 : 1;
+}
+
+function tradeSizeUsd(bucket: string) {
+  switch (bucket) {
+    case "large":
+      return 50;
+    case "medium":
+      return 20;
+    default:
+      return 10;
+  }
+}
+
+function formatUsdCompact(value: number) {
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: value >= 100 ? 0 : 2,
+    maximumFractionDigits: value >= 100 ? 0 : 2,
+  })}`;
+}
+
+function formatPct(value: number) {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
+}
+
+function getTradeKlineUrl(asset: string) {
+  const config = TRADE_KLINE_CONFIG[asset];
+  if (!config) return null;
+  const now = Date.now();
+  let url = `${config.base}&interval=5m&limit=2&endTime=${now}`;
+  if (config.hasStartTime) {
+    url += `&startTime=${now - 2 * 5 * 60 * 1000}`;
+  }
+  return url;
+}
+
+function TestTradeCard({
+  data,
+  onClose,
+  livePrice,
+  amountUsd,
+  onAmountChange,
+}: {
+  data: DecisionAsset;
+  onClose: () => void;
+  livePrice: number;
+  amountUsd: number;
+  onAmountChange: (value: number) => void;
+}) {
+  const decision = data.signal_story.decision_summary;
+  const entry = livePrice;
+  const targetMove = tradeTargetPercent(decision.action);
+  const targetPrice = entry > 0 ? entry * (1 + targetMove) : 0;
+  const sizeUsd = amountUsd;
+  const leverage = tradeLeverage(decision.action);
+  const feesRate = tradeFeeRate(decision.action);
+  const notional = sizeUsd * leverage;
+  const grossPnl = notional * Math.abs(targetMove);
+  const fees = notional * feesRate;
+  const netPnl = grossPnl - fees;
+  const supportCount = data.signal_story.evidence.supporting_components.length;
+  const totalSignals = Math.max(
+    supportCount + data.signal_story.evidence.opposing_components.length,
+    data.signal_output?.signal?.available_component_count ?? 0,
+    1,
+  );
+  const downside = decision.conviction === "high" ? -0.002 : decision.conviction === "medium" ? -0.003 : -0.004;
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close trade tester"
+        className="fixed inset-0 z-30 bg-transparent"
+        onClick={onClose}
+      />
+      <div
+        className="fixed bottom-4 right-4 z-40 w-[min(360px,calc(100vw-1.5rem))] rounded-2xl border p-4 shadow-2xl backdrop-blur-md sm:bottom-5 sm:right-5 sm:p-5"
+        style={{
+          borderColor: B,
+          background: "rgba(10,10,10,0.92)",
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-mono uppercase tracking-[0.16em] font-bold" style={{ color: "var(--foreground-dim)" }}>
+            Test This Trade
+          </p>
+          <p className="mt-1 text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+            If you started this trade now, this is the live setup.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="mr-1 rounded-full border px-2 py-1 text-[10px] font-mono uppercase tracking-[0.14em] transition-colors"
+            style={{
+              borderColor: B,
+              color: "var(--foreground-faint)",
+              background: "transparent",
+            }}
+          >
+            Close
+          </button>
+          <span
+            className="inline-flex h-2.5 w-2.5 rounded-full"
+            style={{ background: "var(--bull)" }}
+          />
+          <span className="text-[10px] font-mono uppercase tracking-[0.16em] font-bold" style={{ color: "var(--foreground-faint)" }}>
+            Live
+          </span>
+          <span
+            className="rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+            style={{
+              color: decision.action === "perps_short" ? "var(--bear)" : decision.action === "wait" ? "var(--foreground-faint)" : "var(--bull)",
+              background: decision.action === "perps_short" ? "var(--bear-track)" : decision.action === "wait" ? "var(--surface-2)" : "var(--bull-track)",
+            }}
+          >
+            {actionLabel(decision.action)}
+          </span>
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3">
+        <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
+          <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+            Trade Summary
+          </p>
+          <div className="grid grid-cols-1 gap-2 text-[12px] font-mono sm:grid-cols-2">
+            <p style={{ color: "var(--foreground-muted)" }}>Pair: <span style={{ color: "var(--foreground)" }}>{data.asset}/USDC</span></p>
+            <p style={{ color: "var(--foreground-muted)" }}>Market: <span style={{ color: "var(--foreground)" }}>{actionMarket(decision.action)}</span></p>
+            <p style={{ color: "var(--foreground-muted)" }}>Entry: <span style={{ color: "var(--foreground)" }}>{formatPrice(entry)}</span></p>
+            <p style={{ color: "var(--foreground-muted)" }}>Target: <span style={{ color: "var(--foreground)" }}>{formatPrice(targetPrice)} ({formatPct(targetMove)})</span></p>
+            <label style={{ color: "var(--foreground-muted)" }}>
+              Size:
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={amountUsd}
+                onChange={(event) => onAmountChange(Math.max(1, Number(event.target.value) || 1))}
+                className="ml-2 w-20 border px-2 py-1 text-[12px] font-mono outline-none"
+                style={{
+                  borderColor: B,
+                  background: "var(--surface)",
+                  color: "var(--foreground)",
+                }}
+              />
+            </label>
+            <p style={{ color: "var(--foreground-muted)" }}>Leverage: <span style={{ color: "var(--foreground)" }}>{leverage}x</span></p>
+          </div>
+        </div>
+
+        <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
+          <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+            Expected Outcome
+          </p>
+          <div className="space-y-2 text-[12px] font-mono">
+            <p style={{ color: "var(--foreground-muted)" }}>Net: <span style={{ color: netPnl >= 0 ? "var(--bull)" : "var(--bear)" }}>{`${netPnl >= 0 ? "+" : ""}${formatUsdCompact(netPnl).replace("$", "$")}`}</span></p>
+            <p style={{ color: "var(--foreground-muted)" }}>Move needed: <span style={{ color: "var(--foreground)" }}>{formatPct(Math.abs(targetMove))}</span></p>
+            <p style={{ color: "var(--foreground-muted)" }}>Fees: <span style={{ color: "var(--foreground)" }}>{formatPct(feesRate)} round trip</span></p>
+          </div>
+        </div>
+
+        <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
+          <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+            Setup Read
+          </p>
+          <div className="space-y-2 text-[12px] font-mono">
+            <p style={{ color: "var(--foreground-muted)" }}>
+              Supported by <span style={{ color: "var(--foreground)" }}>{supportCount}/{totalSignals}</span> live signals
+            </p>
+            <p style={{ color: "var(--foreground-muted)" }}>
+              {decision.conviction === "high" ? "Strong" : decision.conviction === "medium" ? "Moderate" : "Cautious"} follow-through expected
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
+        <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+          Risk Trigger
+        </p>
+        <p className="text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+          If invalidated, expected downside could extend toward <span style={{ color: "var(--bear)" }}>{formatPct(downside)}</span>{data.signal_story.invalidations[0] ? ` · ${data.signal_story.invalidations[0]}` : ""}.
+        </p>
+      </div>
+      </div>
+    </>
+  );
 }
 
 function SimpleDecisionView({ data, asset }: { data?: DecisionAsset; asset: string }) {
@@ -480,6 +705,9 @@ export default function Page() {
   const [activeAsset, setActiveAsset] = useState<string>("BTC");
   const [activeView, setActiveView] = useState<ActiveView>("decision");
   const [proMode, setProMode] = useState(true);
+  const [showTradeTester, setShowTradeTester] = useState(false);
+  const [tradeAmountUsd, setTradeAmountUsd] = useState(20);
+  const [liveTradePrice, setLiveTradePrice] = useState<number | null>(null);
   const [decisions, setDecisions] = useState<DecisionAsset[] | null>(null);
   const [marketOverview, setMarketOverview] = useState<MarketOverview | null>(null);
 
@@ -510,6 +738,44 @@ export default function Page() {
   const decisionData = decisions?.find((d) => d.asset === activeAsset) ?? decisions?.[0];
   const updatedAt = activeView === "decision" ? decisionData?.updated_at : marketOverview?.updated_at;
 
+  useEffect(() => {
+    if (!decisionData) return;
+    setTradeAmountUsd(tradeSizeUsd(decisionData.signal_story.decision_summary.position_size_bucket));
+  }, [activeAsset, decisionData?.signal_story.decision_summary.position_size_bucket]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function fetchLivePrice() {
+      const url = getTradeKlineUrl(activeAsset);
+      if (!url) {
+        if (!ignore) setLiveTradePrice(decisionData?.reference_price ?? null);
+        return;
+      }
+
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        const json = await response.json();
+        const latest = Array.isArray(json?.data) ? json.data[json.data.length - 1] : null;
+        const close = latest ? Number(latest.c ?? latest.close ?? 0) : 0;
+        if (!ignore) {
+          setLiveTradePrice(close > 0 ? close : (decisionData?.reference_price ?? null));
+        }
+      } catch {
+        if (!ignore) {
+          setLiveTradePrice(decisionData?.reference_price ?? null);
+        }
+      }
+    }
+
+    fetchLivePrice();
+    const interval = setInterval(fetchLivePrice, 3000);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, [activeAsset, decisionData?.reference_price]);
+
   return (
     <div className="w-full min-w-0 min-h-screen overflow-x-hidden" style={{ background: "var(--background)" }}>
       <HeaderBar
@@ -521,6 +787,31 @@ export default function Page() {
         onProModeChange={setProMode}
         assets={availableAssets}
       />
+
+      {showTradeTester && decisionData ? (
+        <TestTradeCard
+          data={decisionData}
+          livePrice={liveTradePrice ?? decisionData.reference_price ?? 0}
+          amountUsd={tradeAmountUsd}
+          onAmountChange={setTradeAmountUsd}
+          onClose={() => setShowTradeTester(false)}
+        />
+      ) : null}
+
+      {!showTradeTester && decisionData ? (
+        <button
+          type="button"
+          onClick={() => setShowTradeTester(true)}
+          className="fixed bottom-4 right-4 z-30 rounded-full border px-4 py-3 text-[11px] font-mono uppercase tracking-[0.16em] font-bold shadow-2xl transition-colors sm:bottom-5 sm:right-5"
+          style={{
+            borderColor: B,
+            color: "var(--foreground)",
+            background: "rgba(10,10,10,0.92)",
+          }}
+        >
+          Test This Trade
+        </button>
+      ) : null}
 
       {!proMode ? (
         <SimpleDecisionView data={decisionData} asset={activeAsset} />

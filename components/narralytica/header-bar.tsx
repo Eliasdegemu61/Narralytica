@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+
 export type ActiveView = "decision" | "context" | "relationship";
 
 // Asset logo mapping
@@ -36,8 +38,21 @@ export function HeaderBar({
   onProModeChange,
   assets = ["BTC", "ETH"],
 }: HeaderBarProps) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   const primaryAssets = ["BTC", "ETH"].filter((asset) => assets.includes(asset));
   const extraAssets = assets.filter((asset) => !primaryAssets.includes(asset));
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!moreRef.current?.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <header
@@ -124,7 +139,7 @@ export function HeaderBar({
         </button>
 
         {/* Asset toggle */}
-        <div className="flex min-w-0 items-stretch overflow-x-auto">
+        <div className="flex min-w-0 items-stretch overflow-x-auto md:overflow-visible">
           {primaryAssets.map((a) => {
             const active = activeAsset === a;
             const logoUrl = ASSET_LOGOS[a] || ASSET_LOGOS.BTC;
@@ -159,11 +174,15 @@ export function HeaderBar({
 
           {extraAssets.length > 0 && (
             <div
-              className="relative group flex items-stretch border-l shrink-0"
+              ref={moreRef}
+              className="relative flex items-stretch border-l shrink-0"
               style={{ borderColor: "var(--border-subtle)" }}
+              onMouseEnter={() => setMoreOpen(true)}
+              onMouseLeave={() => setMoreOpen(false)}
             >
               <button
                 type="button"
+                onClick={() => setMoreOpen((value) => !value)}
                 className="relative px-4 h-full font-semibold transition-colors flex items-center gap-2 shrink-0"
                 style={{
                   color: extraAssets.includes(activeAsset) ? "var(--foreground)" : "var(--foreground-dim)",
@@ -181,10 +200,11 @@ export function HeaderBar({
               </button>
 
               <div
-                className="absolute right-0 top-full z-50 hidden min-w-[190px] border shadow-2xl group-hover:block"
+                className="absolute right-0 top-full z-50 min-w-[190px] border shadow-2xl"
                 style={{
                   background: "var(--surface)",
                   borderColor: "var(--border-subtle)",
+                  display: moreOpen ? "block" : "none",
                 }}
               >
                 {extraAssets.map((a) => {
@@ -193,7 +213,10 @@ export function HeaderBar({
                   return (
                     <button
                       key={a}
-                      onClick={() => onAssetChange(a)}
+                      onClick={() => {
+                        onAssetChange(a);
+                        setMoreOpen(false);
+                      }}
                       className="flex w-full items-center gap-2 border-b px-4 py-3 font-semibold transition-colors last:border-b-0"
                       style={{
                         borderColor: "var(--border-subtle)",
