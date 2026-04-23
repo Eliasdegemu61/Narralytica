@@ -70,6 +70,7 @@ const PAD_BOT   = 28;
 const PAD_LEFT  = 0;
 const PAD_RIGHT = 68;
 const CHART_H   = 320;
+const MOBILE_CHART_H = 260;
 
 function fmtTime(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -182,7 +183,8 @@ export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover
   const yMax = rawMax + pad;
 
   const drawW = Math.max(0, width - PAD_LEFT - PAD_RIGHT);
-  const drawH = CHART_H - PAD_TOP - PAD_BOT;
+  const chartH = width > 0 && width < 640 ? MOBILE_CHART_H : CHART_H;
+  const drawH = chartH - PAD_TOP - PAD_BOT;
   const toX = (i: number) => PAD_LEFT + (i / (display.length - 1 || 1)) * drawW;
   const toY = (price: number) => PAD_TOP + drawH - ((price - yMin) / (yMax - yMin)) * drawH;
 
@@ -225,17 +227,17 @@ export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover
       </div>
 
       {loading && (
-        <div style={{ height: CHART_H }} className="flex items-center justify-center">
+        <div style={{ height: chartH }} className="flex items-center justify-center">
           <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: LABEL }}>Loading…</span>
         </div>
       )}
       {error && !loading && (
-        <div style={{ height: CHART_H }} className="flex items-center justify-center">
+        <div style={{ height: chartH }} className="flex items-center justify-center">
           <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: LABEL }}>Chart unavailable</span>
         </div>
       )}
       {!loading && !error && candles.length === 0 && (
-        <div style={{ height: CHART_H }} className="flex flex-col items-center justify-center gap-2">
+        <div style={{ height: chartH }} className="flex flex-col items-center justify-center gap-2">
           <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: LABEL }}>Chart data coming soon</span>
           <span className="text-[10px] font-mono" style={{ color: LABEL }}>{asset} klines not yet configured</span>
         </div>
@@ -243,7 +245,7 @@ export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover
       {!loading && !error && width > 0 && display.length > 0 && (
         <svg
           width={width}
-          height={CHART_H}
+          height={chartH}
           style={{ display: "block" }}
           onMouseMove={onMouseMove}
           onMouseLeave={() => setHovered(null)}
@@ -264,7 +266,7 @@ export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover
           {/* Crosshair */}
           {hovered && (
             <>
-              <line x1={hovered.x} x2={hovered.x} y1={PAD_TOP} y2={CHART_H - PAD_BOT}
+              <line x1={hovered.x} x2={hovered.x} y1={PAD_TOP} y2={chartH - PAD_BOT}
                 stroke="#333" strokeWidth={1} />
               <line x1={PAD_LEFT} x2={width - PAD_RIGHT} y1={hovered.y} y2={hovered.y}
                 stroke="#333" strokeWidth={1} strokeDasharray="2 2" />
@@ -299,7 +301,7 @@ export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover
                   x1={mx} 
                   x2={mx} 
                   y1={PAD_TOP} 
-                  y2={CHART_H - PAD_BOT} 
+                  y2={chartH - PAD_BOT} 
                   stroke={isHovered ? "var(--accent)" : "rgba(255,255,255,0.1)"} 
                   strokeWidth={isHovered ? 2 : 1}
                   strokeDasharray="4 2"
@@ -342,7 +344,7 @@ export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover
 
           {/* X-axis labels */}
           {xTicks.map((idx, i) => display[idx] && (
-            <text key={i} x={PAD_LEFT + slotW * idx + slotW / 2} y={CHART_H - 6}
+            <text key={i} x={PAD_LEFT + slotW * idx + slotW / 2} y={chartH - 6}
               fill={LABEL} fontSize={10} fontFamily="var(--font-mono)" textAnchor="middle">
               {fmtTime(display[idx].time)}
             </text>

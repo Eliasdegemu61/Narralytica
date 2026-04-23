@@ -1,7 +1,5 @@
 "use client";
 
-import { formatUpdatedAt } from "@/lib/format";
-
 export type ActiveView = "decision" | "context" | "relationship";
 
 // Asset logo mapping
@@ -20,30 +18,35 @@ const ASSET_LOGOS: Record<string, string> = {
 };
 
 interface HeaderBarProps {
-  updatedAt?: string;
   activeAsset: string;
   onAssetChange: (asset: string) => void;
   activeView: ActiveView;
   onViewChange: (view: ActiveView) => void;
+  proMode: boolean;
+  onProModeChange: (value: boolean) => void;
   assets?: string[];
 }
 
 export function HeaderBar({
-  updatedAt,
   activeAsset,
   onAssetChange,
   activeView,
   onViewChange,
+  proMode,
+  onProModeChange,
   assets = ["BTC", "ETH"],
 }: HeaderBarProps) {
+  const primaryAssets = ["BTC", "ETH"].filter((asset) => assets.includes(asset));
+  const extraAssets = assets.filter((asset) => !primaryAssets.includes(asset));
+
   return (
     <header
-      className="flex items-stretch h-14 border-b sticky top-0 z-50 min-w-0 w-full"
+      className="sticky top-0 z-50 flex min-w-0 w-full flex-col border-b md:h-14 md:flex-row md:items-stretch"
       style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
     >
       {/* Wordmark */}
       <div
-        className="flex items-center px-6 border-r shrink-0"
+        className="flex h-14 items-center border-b px-4 shrink-0 md:border-b-0 md:border-r md:px-6"
         style={{ borderColor: "var(--border-subtle)" }}
       >
         <span className="font-mono text-[13px] tracking-[0.28em] uppercase select-none font-bold" style={{ color: "var(--foreground)" }}>
@@ -52,22 +55,30 @@ export function HeaderBar({
       </div>
 
       {/* View tabs */}
-      <div className="flex items-stretch">
+      <div className="order-3 flex w-full items-stretch border-t md:order-none md:w-[380px] md:shrink-0 md:border-t-0" style={{ borderColor: "var(--border-subtle)" }}>
         {(["decision", "context", "relationship"] as ActiveView[]).map((v) => {
           const active = activeView === v;
+          const hidden = !proMode && v !== "decision";
           return (
             <button
               key={v}
-              onClick={() => onViewChange(v)}
-              className="relative flex items-center px-6 text-[12px] font-mono uppercase tracking-[0.14em] border-r font-semibold transition-colors"
+              onClick={() => !hidden && onViewChange(v)}
+              disabled={hidden}
+              className="relative flex flex-1 items-center justify-center px-3 py-3 text-[11px] font-mono uppercase tracking-[0.14em] border-r font-semibold transition-colors disabled:cursor-default whitespace-nowrap md:px-6 md:text-[12px]"
               style={{
                 borderColor: "var(--border-subtle)",
-                color: active ? "var(--foreground)" : "var(--foreground-dim)",
-                background: active ? "var(--surface-2)" : "transparent",
+                color: hidden
+                  ? "transparent"
+                  : active
+                    ? "var(--foreground)"
+                    : "var(--foreground-dim)",
+                background: active && !hidden ? "var(--surface-2)" : "transparent",
               }}
+              aria-hidden={hidden}
+              tabIndex={hidden ? -1 : 0}
             >
-              {v}
-              {active && (
+              <span style={{ visibility: hidden ? "hidden" : "visible" }}>{v}</span>
+              {active && !hidden && (
                 <span
                   className="absolute bottom-0 left-0 right-0 h-[2px]"
                   style={{ background: "var(--accent)" }}
@@ -79,50 +90,49 @@ export function HeaderBar({
       </div>
 
       {/* Spacer */}
-      <div className="flex-1 min-w-0" />
+      <div className="hidden min-w-0 flex-1 md:block" />
 
       {/* Right cluster */}
-      <div className="flex items-stretch">
-        {/* Live pulse */}
-        <div
-          className="flex items-center gap-2.5 px-5 border-l"
+      <div className="order-2 flex items-stretch justify-between md:order-none">
+        <button
+          type="button"
+          onClick={() => onProModeChange(!proMode)}
+          className="flex h-14 items-center gap-3 px-4 font-mono shrink-0 md:border-l md:px-5"
           style={{ borderColor: "var(--border-subtle)" }}
+          aria-pressed={proMode}
+          title={`Pro Mode ${proMode ? "On" : "Off"}`}
         >
-          <span className="relative flex h-[7px] w-[7px] shrink-0">
+          <span className="text-[11px] uppercase tracking-[0.18em] font-semibold whitespace-nowrap" style={{ color: proMode ? "var(--foreground)" : "var(--foreground-dim)" }}>
+            Pro Mode
+          </span>
+          <span
+            className="relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors overflow-hidden"
+            style={{
+              background: "#050505",
+              borderColor: "rgba(255,255,255,0.08)",
+            }}
+          >
             <span
-              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50"
-              style={{ background: "var(--bull)" }}
+              className="absolute top-[2px] h-5 w-5 rounded-full transition-all"
+              style={{
+                left: proMode ? "18px" : "2px",
+                background: proMode ? "var(--bull)" : "#ffffff",
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
+              }}
             />
-            <span
-              className="relative inline-flex rounded-full h-[7px] w-[7px]"
-              style={{ background: "var(--bull)" }}
-            />
           </span>
-          <span className="text-[11px] font-mono uppercase tracking-[0.18em] hidden sm:block font-semibold" style={{ color: "var(--foreground-dim)" }}>
-            Live
-          </span>
-        </div>
+        </button>
 
-        {/* Timestamp */}
-        <div
-          className="hidden sm:flex items-center px-5 border-l"
-          style={{ borderColor: "var(--border-subtle)" }}
-        >
-          <span className="text-[12px] font-mono tabular-nums font-semibold" style={{ color: "var(--foreground-dim)" }}>
-            {formatUpdatedAt(updatedAt)}
-          </span>
-        </div>
-
-        {/* Asset toggle — scrollable if many */}
-        <div className="flex items-stretch overflow-x-auto no-scrollbar max-w-[400px] lg:max-w-[600px] xl:max-w-none">
-          {assets.map((a) => {
+        {/* Asset toggle */}
+        <div className="flex min-w-0 items-stretch overflow-x-auto">
+          {primaryAssets.map((a) => {
             const active = activeAsset === a;
             const logoUrl = ASSET_LOGOS[a] || ASSET_LOGOS.BTC;
             return (
               <button
                 key={a}
                 onClick={() => onAssetChange(a)}
-                className="relative px-4 h-full font-semibold transition-colors flex items-center gap-2 shrink-0"
+                className="relative flex h-14 shrink-0 items-center gap-2 px-3 font-semibold transition-colors md:px-4"
                 style={{
                   borderColor: "var(--border-subtle)",
                   borderLeft: `1px solid var(--border-subtle)`,
@@ -146,6 +156,64 @@ export function HeaderBar({
               </button>
             );
           })}
+
+          {extraAssets.length > 0 && (
+            <div
+              className="relative group flex items-stretch border-l shrink-0"
+              style={{ borderColor: "var(--border-subtle)" }}
+            >
+              <button
+                type="button"
+                className="relative px-4 h-full font-semibold transition-colors flex items-center gap-2 shrink-0"
+                style={{
+                  color: extraAssets.includes(activeAsset) ? "var(--foreground)" : "var(--foreground-dim)",
+                  background: extraAssets.includes(activeAsset) ? "var(--surface-2)" : "transparent",
+                }}
+              >
+                <span className="text-[12px] font-mono uppercase tracking-[0.14em] whitespace-nowrap">More</span>
+                <span className="text-[10px]" style={{ color: "var(--foreground-faint)" }}>▾</span>
+                {extraAssets.includes(activeAsset) && (
+                  <span
+                    className="absolute bottom-0 left-0 right-0 h-[2px]"
+                    style={{ background: "var(--accent)" }}
+                  />
+                )}
+              </button>
+
+              <div
+                className="absolute right-0 top-full z-50 hidden min-w-[190px] border shadow-2xl group-hover:block"
+                style={{
+                  background: "var(--surface)",
+                  borderColor: "var(--border-subtle)",
+                }}
+              >
+                {extraAssets.map((a) => {
+                  const active = activeAsset === a;
+                  const logoUrl = ASSET_LOGOS[a] || ASSET_LOGOS.BTC;
+                  return (
+                    <button
+                      key={a}
+                      onClick={() => onAssetChange(a)}
+                      className="flex w-full items-center gap-2 border-b px-4 py-3 font-semibold transition-colors last:border-b-0"
+                      style={{
+                        borderColor: "var(--border-subtle)",
+                        color: active ? "var(--foreground)" : "var(--foreground-dim)",
+                        background: active ? "var(--surface-2)" : "transparent",
+                      }}
+                    >
+                      <img
+                        src={logoUrl}
+                        alt={a}
+                        className="w-5 h-5 rounded-full"
+                        crossOrigin="anonymous"
+                      />
+                      <span className="text-[12px] font-mono uppercase tracking-[0.14em]">{a}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

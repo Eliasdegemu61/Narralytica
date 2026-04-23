@@ -191,6 +191,7 @@ export interface NewsItem {
   id: string;
   asset: string;
   title: string;
+  original_title?: string;
   timestamp_ms: number;
   timestamp_iso: string;
   bucket_open_ms_4h: number;
@@ -204,6 +205,7 @@ export interface NewsItem {
   tags: string[];
   matched_currencies: Record<string, unknown>[];
   feature_image: string | null;
+  content_excerpt?: string;
   impression_count: number;
   like_count: number;
   reply_count: number;
@@ -255,6 +257,42 @@ export async function fetchNewsCache(asset: string): Promise<NewsCachePayload | 
     return payload as NewsCachePayload;
   } catch (err) {
     console.error("[v0] fetchNewsCache error:", err);
+    return null;
+  }
+}
+
+export interface MarketNewsCachePayload {
+  updated_at: string;
+  scope: string;
+  lookback_hours: number;
+  time_bucket: string;
+  major_items: NewsItem[];
+  recent_items: NewsItem[];
+  markers_4h: MarkerGroup[];
+  summary: {
+    total_items: number;
+    major_count: number;
+    recent_count: number;
+    has_news: boolean;
+  };
+}
+
+export async function fetchMarketNewsCache(): Promise<MarketNewsCachePayload | null> {
+  try {
+    const res = await fetch("/api/site-cache?cache_key=news_chart_crypto", { cache: "no-store" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const row = json.data;
+    if (!row) return null;
+
+    let payload = row.payload;
+    if (typeof payload === "string") {
+      try { payload = JSON.parse(payload); } catch {}
+    }
+
+    return payload as MarketNewsCachePayload;
+  } catch (err) {
+    console.error("[v0] fetchMarketNewsCache error:", err);
     return null;
   }
 }

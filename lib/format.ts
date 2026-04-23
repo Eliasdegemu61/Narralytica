@@ -19,11 +19,13 @@ export function formatDomPercent(value: number): string {
 }
 
 export function formatPrice(value: number): string {
+  const abs = Math.abs(value);
+  const fractionDigits = abs >= 1000 ? 0 : 2;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
   }).format(value);
 }
 

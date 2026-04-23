@@ -17,9 +17,9 @@
 
   /* ── Typography ── */
   --foreground:       oklch(0.94 0 0);      /* #f0f0f0  */
-  --foreground-muted: oklch(0.58 0 0);      /* #808080  */
-  --foreground-dim:   oklch(0.38 0 0);      /* #505050  */
-  --foreground-faint: oklch(0.24 0 0);      /* #2e2e2e  */
+  --foreground-muted: oklch(0.68 0 0);      /* softer readable gray */
+  --foreground-dim:   oklch(0.56 0 0);      /* readable secondary text */
+  --foreground-faint: oklch(0.44 0 0);      /* visible tertiary text */
 
   /* ── Signal — vivid & clear ── */
   --bull:            oklch(0.72 0.19 145);  /* #22c55e  */
