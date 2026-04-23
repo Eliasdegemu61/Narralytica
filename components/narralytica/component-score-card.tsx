@@ -5,11 +5,13 @@ const STATE_COLOR: Record<string, string> = {
   bullish: "var(--bull)",
   bearish: "var(--bear)",
   neutral: "var(--neutral-fg)",
+  unavailable: "var(--foreground-dim)",
 };
 const STATE_TRACK: Record<string, string> = {
   bullish: "var(--bull-track)",
   bearish: "var(--bear-track)",
   neutral: "var(--neutral-track)",
+  unavailable: "var(--surface-2)",
 };
 
 function EvidenceRow({ label, value }: { label: string; value: string }) {

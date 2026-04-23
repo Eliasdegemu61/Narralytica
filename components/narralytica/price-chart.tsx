@@ -22,6 +22,12 @@ interface Candle {
   bullish: boolean;
 }
 
+interface NewsMarker {
+  id: string;
+  release_time: number;
+  x?: number;
+}
+
 // Kline config per asset: { base, interval, limit, hasStartTime }
 const KLINE_CONFIG: Record<string, { base: string; interval: string; limit: number; hasStartTime: boolean }> = {
   BTC:  { base: "https://mainnet-gw.sodex.dev/futures/fapi/market/v1/public/q/kline?symbol=BTC-USD", interval: "5m", limit: 500, hasStartTime: true },
@@ -75,9 +81,14 @@ function fmtPrice(p: number) {
     : `$${p.toFixed(2)}`;
 }
 
-interface PriceChartProps { asset: string }
+interface PriceChartProps { 
+  asset: string;
+  newsMarkers?: NewsMarker[];
+  hoveredNewsId?: string | null;
+  onNewsHover?: (id: string | null) => void;
+}
 
-export function PriceChart({ asset }: PriceChartProps) {
+export function PriceChart({ asset, newsMarkers = [], hoveredNewsId, onNewsHover }: PriceChartProps) {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading]  = useState(true);
   const [error, setError]      = useState(false);
@@ -97,23 +108,29 @@ export function PriceChart({ asset }: PriceChartProps) {
 
   // Fetch candles on mount and every 3 seconds
   useEffect(() => {
+    let ignore = false;
+
+    // Clear state when asset changes to prevent mixing data from different assets
+    setCandles([]);
+    setLoading(true);
+    setError(false);
+
     // If no kline config for this asset, show placeholder
     if (!KLINE_CONFIG[asset]) {
-      setCandles([]);
       setLoading(false);
-      setError(false);
       return;
     }
     
     const fetchKlines = () => {
-      const url = getKlineUrl(asset); // Generate fresh URL with current endTime
+      const url = getKlineUrl(asset); 
       if (!url) return;
       
-      setError(false);
       fetch(url)
         .then(r => r.json())
         .then((json: { code: number; data: Kline[] }) => {
+          if (ignore) return;
           if (json.code !== 0 || !json.data) { setError(true); return; }
+          
           const sorted = [...json.data].sort((a, b) => a.t - b.t);
           const newCandles = sorted.map(k => {
             const o = parseFloat(k.o), c = parseFloat(k.c);
@@ -121,23 +138,31 @@ export function PriceChart({ asset }: PriceChartProps) {
           });
           
           setCandles((prev) => {
+            // If the effect was cleaned up or asset changed, don't update with old data
+            if (ignore) return prev;
             if (prev.length === 0) {
               setLoading(false);
               return newCandles;
             }
-            
-            // Merge: remove duplicates by time, append new candles
+            // Polling update: merge with existing
             const map = new Map(prev.map(c => [c.time, c]));
             newCandles.forEach(c => map.set(c.time, c));
             return Array.from(map.values()).sort((a, b) => a.time - b.time);
           });
         })
-        .catch(() => setError(true));
+        .catch(() => {
+          if (ignore) return;
+          setError(true);
+        });
     };
 
     fetchKlines();
     const interval = setInterval(fetchKlines, 3000);
-    return () => clearInterval(interval);
+    
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
   }, [asset]);
 
   const display = candles.slice(-100);
@@ -245,6 +270,49 @@ export function PriceChart({ asset }: PriceChartProps) {
                 stroke="#333" strokeWidth={1} strokeDasharray="2 2" />
             </>
           )}
+
+          {/* News Markers */}
+          {newsMarkers.map((m) => {
+            // Find closest candle index
+            let closestIdx = -1;
+            let minDiff = Infinity;
+            display.forEach((c, i) => {
+              const diff = Math.abs(c.time - m.release_time);
+              if (diff < minDiff) {
+                minDiff = diff;
+                closestIdx = i;
+              }
+            });
+
+            if (closestIdx === -1) return null;
+            const mx = toX(closestIdx);
+            const isHovered = hoveredNewsId === m.id;
+
+            return (
+              <g 
+                key={m.id} 
+                onMouseEnter={() => onNewsHover?.(m.id)}
+                onMouseLeave={() => onNewsHover?.(null)}
+                style={{ cursor: "pointer" }}
+              >
+                <line 
+                  x1={mx} 
+                  x2={mx} 
+                  y1={PAD_TOP} 
+                  y2={CHART_H - PAD_BOT} 
+                  stroke={isHovered ? "var(--accent)" : "rgba(255,255,255,0.1)"} 
+                  strokeWidth={isHovered ? 2 : 1}
+                  strokeDasharray="4 2"
+                />
+                <circle 
+                  cx={mx} 
+                  cy={PAD_TOP + 10} 
+                  r={isHovered ? 5 : 3} 
+                  fill={isHovered ? "var(--accent)" : "rgba(255,255,255,0.2)"} 
+                />
+              </g>
+            );
+          })}
 
           {/* Candlesticks */}
           {display.map((d, i) => {

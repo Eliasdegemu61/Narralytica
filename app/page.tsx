@@ -11,6 +11,7 @@ import { SpotlightList } from "@/components/narralytica/spotlight-list";
 import { DecisionHeader } from "@/components/narralytica/decision-header";
 import { ComponentScoreCard } from "@/components/narralytica/component-score-card";
 import { PriceChart } from "@/components/narralytica/price-chart";
+import { RelationshipModule } from "@/components/narralytica/relationship-module";
 
 const B = "var(--border-subtle)";
 
@@ -69,7 +70,7 @@ function SectionLabel({ eyebrow, title, meta }: { eyebrow: string; title?: strin
 
 export default function Page() {
   const [activeAsset, setActiveAsset] = useState<string>("BTC");
-  const [activeView, setActiveView]   = useState<ActiveView>("decision");
+  const [activeView, setActiveView] = useState<ActiveView>("decision");
   const [decisions, setDecisions] = useState<DecisionAsset[] | null>(null);
   const [marketOverview, setMarketOverview] = useState<MarketOverview | null>(null);
 
@@ -116,7 +117,7 @@ export default function Page() {
         <div>
           {/* Chart + Decision side-by-side */}
           <div
-            className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_420px] border-b"
+            className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_500px] border-b"
             style={{ borderColor: B }}
           >
             {/* Chart panel */}
@@ -234,20 +235,20 @@ export default function Page() {
               meta={decisionData ? `${decisionData.signal_story.component_cards.length} signals` : ""}
             />
             {!decisionData ? <div className="px-6 py-6"><Skeleton lines={4} /></div> :
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-              {decisionData.signal_story.component_cards.map((card, i) => (
-                <div
-                  key={card.name}
-                  style={{
-                    borderRight:
-                      (i + 1) % 4 !== 0 ? `1px solid ${B}` : undefined,
-                  }}
-                  className="[&:nth-child(2n)]:border-r-0 sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(4n)]:border-r-0 lg:border-r"
-                >
-                  <ComponentScoreCard card={card} />
-                </div>
-              ))}
-            </div>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                {decisionData.signal_story.component_cards.map((card, i) => (
+                  <div
+                    key={card.name}
+                    style={{
+                      borderRight:
+                        (i + 1) % 4 !== 0 ? `1px solid ${B}` : undefined,
+                    }}
+                    className="[&:nth-child(2n)]:border-r-0 sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(4n)]:border-r-0 lg:border-r"
+                  >
+                    <ComponentScoreCard card={card} />
+                  </div>
+                ))}
+              </div>}
           </div>
 
           {/* Metric Weighting Hierarchy */}
@@ -315,6 +316,9 @@ export default function Page() {
             </span>
           </footer>
         </div>
+      ) : activeView === "relationship" ? (
+        /* ════════════════ RELATIONSHIP VIEW ════════════════ */
+        <RelationshipModule asset={activeAsset} />
       ) : (
         /* ════════════════ CONTEXT VIEW ════════════════ */
         <div>

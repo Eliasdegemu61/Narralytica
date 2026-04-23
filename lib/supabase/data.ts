@@ -185,6 +185,80 @@ export async function fetchEngineSummary(): Promise<EngineSummary | null> {
   }
 }
 
+// ── site_cache: news_chart_{asset} ────────────────────────────────────────────
+
+export interface NewsItem {
+  id: string;
+  asset: string;
+  title: string;
+  timestamp_ms: number;
+  timestamp_iso: string;
+  bucket_open_ms_4h: number;
+  bucket_open_iso_4h: string;
+  source_link: string | null;
+  original_link: string | null;
+  category: number;
+  category_label: string;
+  author: string | null;
+  nick_name: string | null;
+  tags: string[];
+  matched_currencies: Record<string, unknown>[];
+  feature_image: string | null;
+  impression_count: number;
+  like_count: number;
+  reply_count: number;
+  retweet_count: number;
+  importance_score: number;
+  is_major: boolean;
+}
+
+export interface MarkerGroup {
+  bucket_open_ms_4h: number;
+  bucket_open_iso_4h: string;
+  item_count: number;
+  top_title: string;
+  titles: string[];
+  items: NewsItem[];
+}
+
+export interface NewsCachePayload {
+  updated_at: string;
+  asset: string;
+  currency_id: string | null;
+  lookback_days: number;
+  time_bucket: string;
+  major_items: NewsItem[];
+  recent_items: NewsItem[];
+  markers_4h: MarkerGroup[];
+  summary: {
+    total_items: number;
+    major_count: number;
+    recent_count: number;
+    has_news: boolean;
+  };
+}
+
+export async function fetchNewsCache(asset: string): Promise<NewsCachePayload | null> {
+  try {
+    const cacheKey = `news_chart_${asset.toLowerCase()}`;
+    const res = await fetch(`/api/site-cache?cache_key=${cacheKey}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const row = json.data;
+    if (!row) return null;
+
+    let payload = row.payload;
+    if (typeof payload === "string") {
+      try { payload = JSON.parse(payload); } catch {}
+    }
+
+    return payload as NewsCachePayload;
+  } catch (err) {
+    console.error("[v0] fetchNewsCache error:", err);
+    return null;
+  }
+}
+
 // Legacy alias for backwards compatibility
 export type SiteCache = MarketOverview;
 export const fetchSiteCache = fetchMarketOverview;

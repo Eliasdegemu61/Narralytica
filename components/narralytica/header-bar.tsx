@@ -2,7 +2,7 @@
 
 import { formatUpdatedAt } from "@/lib/format";
 
-export type ActiveView = "decision" | "context";
+export type ActiveView = "decision" | "context" | "relationship";
 
 // Asset logo mapping
 const ASSET_LOGOS: Record<string, string> = {
@@ -53,7 +53,7 @@ export function HeaderBar({
 
       {/* View tabs */}
       <div className="flex items-stretch">
-        {(["decision", "context"] as ActiveView[]).map((v) => {
+        {(["decision", "context", "relationship"] as ActiveView[]).map((v) => {
           const active = activeView === v;
           return (
             <button
@@ -113,38 +113,40 @@ export function HeaderBar({
           </span>
         </div>
 
-        {/* Asset toggle */}
-        {assets.map((a) => {
-          const active = activeAsset === a;
-          const logoUrl = ASSET_LOGOS[a] || ASSET_LOGOS.BTC;
-          return (
-            <button
-              key={a}
-              onClick={() => onAssetChange(a)}
-              className="relative px-4 h-full font-semibold transition-colors flex items-center gap-2"
-              style={{
-                borderColor: "var(--border-subtle)",
-                borderLeft: `1px solid var(--border-subtle)`,
-                color: active ? "var(--foreground)" : "var(--foreground-dim)",
-                background: active ? "var(--surface-2)" : "transparent",
-              }}
-            >
-              <img 
-                src={logoUrl} 
-                alt={a} 
-                className="w-5 h-5 rounded-full"
-                crossOrigin="anonymous"
-              />
-              <span className="text-[12px] font-mono uppercase tracking-[0.14em]">{a}</span>
-              {active && (
-                <span
-                  className="absolute bottom-0 left-0 right-0 h-[2px]"
-                  style={{ background: "var(--accent)" }}
+        {/* Asset toggle — scrollable if many */}
+        <div className="flex items-stretch overflow-x-auto no-scrollbar max-w-[400px] lg:max-w-[600px] xl:max-w-none">
+          {assets.map((a) => {
+            const active = activeAsset === a;
+            const logoUrl = ASSET_LOGOS[a] || ASSET_LOGOS.BTC;
+            return (
+              <button
+                key={a}
+                onClick={() => onAssetChange(a)}
+                className="relative px-4 h-full font-semibold transition-colors flex items-center gap-2 shrink-0"
+                style={{
+                  borderColor: "var(--border-subtle)",
+                  borderLeft: `1px solid var(--border-subtle)`,
+                  color: active ? "var(--foreground)" : "var(--foreground-dim)",
+                  background: active ? "var(--surface-2)" : "transparent",
+                }}
+              >
+                <img 
+                  src={logoUrl} 
+                  alt={a} 
+                  className="w-5 h-5 rounded-full"
+                  crossOrigin="anonymous"
                 />
-              )}
-            </button>
-          );
-        })}
+                <span className="text-[12px] font-mono uppercase tracking-[0.14em]">{a}</span>
+                {active && (
+                  <span
+                    className="absolute bottom-0 left-0 right-0 h-[2px]"
+                    style={{ background: "var(--accent)" }}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </header>
   );

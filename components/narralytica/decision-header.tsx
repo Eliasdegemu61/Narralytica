@@ -63,7 +63,7 @@ export function DecisionHeader({ data }: DecisionHeaderProps) {
 
       {/* ── HERO: Headline + Price ── */}
       <div
-        className="grid grid-cols-1 lg:grid-cols-[1fr_220px] border-b"
+        className="grid grid-cols-1 lg:grid-cols-[1fr_300px] border-b"
         style={{ borderColor: "var(--border-subtle)" }}
       >
         {/* Headline */}
