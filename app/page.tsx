@@ -576,7 +576,7 @@ function SignalApiView({ data }: { data?: DecisionAsset }) {
   const asset = data?.asset ?? "BTC";
   const curlLines = [
     "curl -X GET \\",
-    `  \"http://localhost:3000/api/signal-api?asset=${asset}\"`,
+    `  \"https://www.narralytica.xyz/api/signal-api?asset=${asset}\"`,
   ];
 
   return (

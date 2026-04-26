@@ -1,35 +1,68 @@
-# Narralytica-web-v5
+# Narralytica Web
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [v0](https://v0.app).
+Narralytica Web is the frontend for the Narralytica signal platform.
 
-## Built with v0
+It presents:
+- major asset decision signals
+- quick trade reads for supported assets
+- relationship and market context views
+- a public signal endpoint for asset-specific JSON output
 
-This repository is linked to a [v0](https://v0.app) project. You can continue developing by visiting the link below -- start new chats to make changes, and v0 will push commits directly to this repo. Every merge to `main` will automatically deploy.
+## What It Does
 
-[Continue working on v0 →](https://v0.app/chat/projects/prj_zckKxUzHuYeJ31fABsAnnQWgv6aj)
+This app reads the latest published signal data from backend infrastructure and turns it into a clean trading interface.
 
-## Getting Started
+The product is designed to:
+- surface the current directional read for an asset
+- show supporting signal structure in a readable way
+- expose a simple machine-friendly signal endpoint
 
-First, run the development server:
+## Stack
+
+- Next.js
+- React
+- TypeScript
+- Supabase
+
+## Local Development
+
+Install dependencies and run the app:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+For local preview, the app runs on the default Next.js development port.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Live Endpoint
 
-## Learn More
+Production signal endpoint example:
 
-To learn more, take a look at the following resources:
+```bash
+https://www.narralytica.xyz/api/signal-api?asset=BTC
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [v0 Documentation](https://v0.app/docs) - learn about v0 and how to use it.
+## Environment
 
-<a href="https://v0.app/chat/api/kiro/clone/Eliasdegemu61/Narralytica-web-v5" alt="Open in Kiro"><img src="https://pdgvvgmkdvyeydso.public.blob.vercel-storage.com/open%20in%20kiro.svg?sanitize=true" /></a>
+This project expects local environment variables for its backend connection.
+
+Create a local `.env` file with the required values for:
+- Supabase URL
+- Supabase anon key
+- any other server-side values used by local API routes
+
+Do not commit secrets.
+
+## Main Areas
+
+- `app/` - routes, pages, and API endpoints
+- `components/` - UI modules
+- `lib/` - data access, formatting, and shared helpers
+- `styles/` - styling utilities
+
+## Notes
+
+- `.next/` is generated build output
+- `node_modules/` contains installed dependencies
+- local log files can be deleted safely when not needed
