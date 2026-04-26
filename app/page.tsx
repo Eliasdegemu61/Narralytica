@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fetchLatestAssetState, fetchMarketOverview, type MarketOverview, type DecisionAsset } from "@/lib/supabase/data";
+import { useEffect, useRef, useState } from "react";
+import { fetchLatestAssetState, fetchMarketOverview, fetchQuickTradeInputs, type MarketOverview, type DecisionAsset, type QuickTradeInputPayload } from "@/lib/supabase/data";
 import { HeaderBar, type ActiveView } from "@/components/narralytica/header-bar";
 import { FearGreedModule } from "@/components/narralytica/fear-greed-module";
 import { EtfFlowModule } from "@/components/narralytica/etf-flow-module";
 import { OpenInterestModule } from "@/components/narralytica/open-interest-module";
-import { SectorTable } from "@/components/narralytica/sector-table";
-import { SpotlightList } from "@/components/narralytica/spotlight-list";
 import { DecisionHeader } from "@/components/narralytica/decision-header";
 import { ComponentScoreCard } from "@/components/narralytica/component-score-card";
 import { PriceChart } from "@/components/narralytica/price-chart";
 import { RelationshipModule } from "@/components/narralytica/relationship-module";
+import { QuickTradeModule } from "@/components/narralytica/quick-trade-module";
 import { formatPrice } from "@/lib/format";
 
 const B = "var(--border-subtle)";
@@ -146,6 +145,12 @@ function formatPct(value: number) {
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
 }
 
+function tradeDirection(action: string) {
+  if (action === "perps_short") return -1;
+  if (action === "perps_long" || action === "spot_long") return 1;
+  return 0;
+}
+
 function getTradeKlineUrl(asset: string) {
   const config = TRADE_KLINE_CONFIG[asset];
   if (!config) return null;
@@ -171,145 +176,343 @@ function TestTradeCard({
   onAmountChange: (value: number) => void;
 }) {
   const decision = data.signal_story.decision_summary;
-  const entry = livePrice;
-  const targetMove = tradeTargetPercent(decision.action);
-  const targetPrice = entry > 0 ? entry * (1 + targetMove) : 0;
-  const sizeUsd = amountUsd;
+  const [entryMode, setEntryMode] = useState<"market" | "limit">("market");
+  const [planStyle, setPlanStyle] = useState<"conservative" | "balanced" | "aggressive">("balanced");
+  const [customTargetPct, setCustomTargetPct] = useState(0.8);
+
+  const direction = tradeDirection(decision.action);
+  const isPerps = decision.action === "perps_long" || decision.action === "perps_short";
+  const isSpot = decision.action === "spot_long";
+  const isWait = decision.action === "wait";
+  const liveEntry = livePrice > 0 ? livePrice : data.reference_price ?? 0;
+  const baseTargetPct = Math.abs(tradeTargetPercent(decision.action));
+  const baseStopPct =
+    decision.conviction === "high" ? 0.0025 :
+    decision.conviction === "medium" ? 0.0035 :
+    0.0045;
+  const scenario =
+    planStyle === "conservative"
+      ? { label: "Conservative", targetMult: 0.8, stopMult: 0.85, entryOffset: 0.0008, sizeMult: 0.8 }
+      : planStyle === "aggressive"
+        ? { label: "Aggressive", targetMult: 1.75, stopMult: 1.15, entryOffset: 0.0014, sizeMult: 1.2 }
+        : { label: "Balanced", targetMult: 1, stopMult: 1, entryOffset: 0.0011, sizeMult: 1 };
+  const entry =
+    liveEntry > 0 && entryMode === "limit" && direction !== 0
+      ? liveEntry * (1 + (direction === 1 ? -scenario.entryOffset : scenario.entryOffset))
+      : liveEntry;
+  const targetPct = Math.max(0, customTargetPct / 100);
+  const stopPct = baseStopPct * scenario.stopMult;
+  const targetPrice = entry > 0 && direction !== 0 ? entry * (1 + direction * targetPct) : 0;
+  const stopPrice = entry > 0 && direction !== 0 ? entry * (1 - direction * stopPct) : 0;
   const leverage = tradeLeverage(decision.action);
-  const feesRate = tradeFeeRate(decision.action);
-  const notional = sizeUsd * leverage;
-  const grossPnl = notional * Math.abs(targetMove);
-  const fees = notional * feesRate;
-  const netPnl = grossPnl - fees;
+  const notional = amountUsd * leverage;
+  const quantity = entry > 0 ? notional / entry : 0;
+  const grossTargetPnl = direction === 0 ? 0 : Math.abs(targetPrice - entry) * quantity;
+  const grossStopLoss = direction === 0 ? 0 : Math.abs(stopPrice - entry) * quantity;
+  const targetPnl = grossTargetPnl;
+  const stopLoss = -grossStopLoss;
+  const riskReward = grossStopLoss > 0 ? grossTargetPnl / grossStopLoss : null;
   const supportCount = data.signal_story.evidence.supporting_components.length;
   const totalSignals = Math.max(
     supportCount + data.signal_story.evidence.opposing_components.length,
-    data.signal_output?.signal?.available_component_count ?? 0,
+    data.signal_story.component_cards.length,
     1,
   );
-  const downside = decision.conviction === "high" ? -0.002 : decision.conviction === "medium" ? -0.003 : -0.004;
+  const downside = -stopPct;
+  const setupAccent =
+    decision.action === "perps_short" ? "var(--bear)" :
+    decision.action === "wait" ? "var(--foreground-faint)" :
+    "var(--bull)";
+  const setupTrack =
+    decision.action === "perps_short" ? "var(--bear-track)" :
+    decision.action === "wait" ? "var(--surface-2)" :
+    "var(--bull-track)";
+  const invalidationLead = data.signal_story.invalidations[0] ?? "Wait for a cleaner setup before risking capital.";
+  const rationale = data.signal_story.why.slice(0, 3);
+  const recommendedSizeText =
+    decision.position_size_bucket === "large" ? "Full risk unit" :
+    decision.position_size_bucket === "medium" ? "Half risk unit" :
+    "Starter size only";
+  const liquidationPct = isPerps ? Math.max(0.03, (1 / leverage) * 0.8) : null;
+  const liquidationPrice =
+    liquidationPct && direction !== 0 && entry > 0
+      ? entry * (1 - direction * liquidationPct)
+      : null;
+  const riskPercentOfCapital = amountUsd > 0 ? Math.abs(stopLoss) / amountUsd : 0;
 
   return (
     <>
       <button
         type="button"
-        aria-label="Close trade tester"
-        className="fixed inset-0 z-30 bg-transparent"
+        aria-label="Close trade plan"
+        className="fixed inset-0 z-30 bg-black/50"
         onClick={onClose}
       />
       <div
-        className="fixed bottom-4 right-4 z-40 w-[min(360px,calc(100vw-1.5rem))] rounded-2xl border p-4 shadow-2xl backdrop-blur-md sm:bottom-5 sm:right-5 sm:p-5"
+        className="fixed right-0 top-0 z-40 h-screen w-[min(460px,100vw)] border-l shadow-2xl"
         style={{
           borderColor: B,
-          background: "rgba(10,10,10,0.92)",
+          background: "rgba(8,8,8,0.97)",
+          backdropFilter: "blur(18px)",
         }}
         onClick={(event) => event.stopPropagation()}
       >
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-mono uppercase tracking-[0.16em] font-bold" style={{ color: "var(--foreground-dim)" }}>
-            Test This Trade
-          </p>
-          <p className="mt-1 text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
-            If you started this trade now, this is the live setup.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="mr-1 rounded-full border px-2 py-1 text-[10px] font-mono uppercase tracking-[0.14em] transition-colors"
-            style={{
-              borderColor: B,
-              color: "var(--foreground-faint)",
-              background: "transparent",
-            }}
-          >
-            Close
-          </button>
-          <span
-            className="inline-flex h-2.5 w-2.5 rounded-full"
-            style={{ background: "var(--bull)" }}
-          />
-          <span className="text-[10px] font-mono uppercase tracking-[0.16em] font-bold" style={{ color: "var(--foreground-faint)" }}>
-            Live
-          </span>
-          <span
-            className="rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
-            style={{
-              color: decision.action === "perps_short" ? "var(--bear)" : decision.action === "wait" ? "var(--foreground-faint)" : "var(--bull)",
-              background: decision.action === "perps_short" ? "var(--bear-track)" : decision.action === "wait" ? "var(--surface-2)" : "var(--bull-track)",
-            }}
-          >
-            {actionLabel(decision.action)}
-          </span>
-        </div>
-      </div>
+        <div className="flex h-full flex-col">
+          <div className="flex items-start justify-between gap-4 border-b px-4 py-4 sm:px-5" style={{ borderColor: B }}>
+            <div>
+              <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
+                Trade Plan
+              </p>
+              <p className="mt-1 text-[13px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                {isWait
+                  ? "No clean trade is active right now. Review risk first and avoid forcing an entry."
+                  : "A live execution plan built from the current signal, with risk shown before reward."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+              style={{ borderColor: B, color: "var(--foreground-faint)" }}
+            >
+              Close
+            </button>
+          </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3">
-        <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
-          <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
-            Trade Summary
-          </p>
-          <div className="grid grid-cols-1 gap-2 text-[12px] font-mono sm:grid-cols-2">
-            <p style={{ color: "var(--foreground-muted)" }}>Pair: <span style={{ color: "var(--foreground)" }}>{data.asset}/USDC</span></p>
-            <p style={{ color: "var(--foreground-muted)" }}>Market: <span style={{ color: "var(--foreground)" }}>{actionMarket(decision.action)}</span></p>
-            <p style={{ color: "var(--foreground-muted)" }}>Entry: <span style={{ color: "var(--foreground)" }}>{formatPrice(entry)}</span></p>
-            <p style={{ color: "var(--foreground-muted)" }}>Target: <span style={{ color: "var(--foreground)" }}>{formatPrice(targetPrice)} ({formatPct(targetMove)})</span></p>
-            <label style={{ color: "var(--foreground-muted)" }}>
-              Size:
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={amountUsd}
-                onChange={(event) => onAmountChange(Math.max(1, Number(event.target.value) || 1))}
-                className="ml-2 w-20 border px-2 py-1 text-[12px] font-mono outline-none"
-                style={{
-                  borderColor: B,
-                  background: "var(--surface)",
-                  color: "var(--foreground)",
-                }}
-              />
-            </label>
-            <p style={{ color: "var(--foreground-muted)" }}>Leverage: <span style={{ color: "var(--foreground)" }}>{leverage}x</span></p>
+          <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-5 sm:py-6">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span
+                className="rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+                style={{ color: setupAccent, background: setupTrack }}
+              >
+                {actionLabel(decision.action)}
+              </span>
+              <span className="rounded-full border px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold" style={{ borderColor: B, color: "var(--foreground-faint)" }}>
+                {actionMarket(decision.action)}
+              </span>
+              <span className="rounded-full border px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold" style={{ borderColor: B, color: "var(--foreground-faint)" }}>
+                {decision.conviction} conviction
+              </span>
+              <span className="rounded-full border px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold" style={{ borderColor: B, color: "var(--foreground-faint)" }}>
+                {decision.position_size_bucket} size
+              </span>
+            </div>
+
+            <div className="mb-4 rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Risk First
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Max Loss</p>
+                  <p className="mt-2 text-[24px] font-mono font-bold" style={{ color: "var(--bear)" }}>
+                    {isWait ? "Stand Aside" : formatUsdCompact(Math.abs(stopLoss))}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Risk / Reward</p>
+                  <p className="mt-2 text-[24px] font-mono font-bold" style={{ color: riskReward && riskReward >= 1.5 ? "var(--bull)" : "var(--foreground)" }}>
+                    {isWait || riskReward == null ? "No Trade" : `1 : ${riskReward.toFixed(2)}`}
+                  </p>
+                </div>
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Stop</p>
+                  <p className="mt-2 text-[14px] font-mono font-bold" style={{ color: "var(--foreground)" }}>
+                    {isWait ? "Wait" : formatPrice(stopPrice)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--bear)" }}>
+                    {formatPct(downside)}
+                  </p>
+                </div>
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Invalidation</p>
+                  <p className="mt-2 text-[11px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                    {invalidationLead}
+                  </p>
+                </div>
+              </div>
+              {!isWait ? (
+                <p className="mt-3 text-[11px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                  This plan risks about {formatPct(riskPercentOfCapital)} of deployed capital. Respect the stop first, then think about reward.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mb-4 rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Setup Controls
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(["market", "limit"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setEntryMode(mode)}
+                    className="rounded-full border px-3 py-2 text-[10px] font-mono uppercase tracking-[0.14em] font-bold"
+                    style={{
+                      borderColor: B,
+                      color: entryMode === mode ? "var(--foreground)" : "var(--foreground-faint)",
+                      background: entryMode === mode ? "var(--surface-2)" : "transparent",
+                    }}
+                  >
+                    {mode === "market" ? "Enter Now" : "Prefer Limit"}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(["conservative", "balanced", "aggressive"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPlanStyle(mode)}
+                    className="rounded-full border px-3 py-2 text-[10px] font-mono uppercase tracking-[0.14em] font-bold"
+                    style={{
+                      borderColor: B,
+                      color: planStyle === mode ? "var(--foreground)" : "var(--foreground-faint)",
+                      background: planStyle === mode ? "var(--surface-2)" : "transparent",
+                    }}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <label className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Capital</p>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={amountUsd}
+                    onChange={(event) => onAmountChange(Math.max(1, Number(event.target.value) || 1))}
+                    className="mt-2 w-full bg-transparent text-[16px] font-mono font-bold outline-none"
+                    style={{ color: "var(--foreground)" }}
+                  />
+                </label>
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Suggested Size</p>
+                  <p className="mt-2 text-[16px] font-mono font-bold" style={{ color: "var(--foreground)" }}>
+                    {recommendedSizeText}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                    {scenario.label} profile
+                  </p>
+                </div>
+              </div>
+              <label className="mt-3 block rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Custom Target %</p>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={customTargetPct}
+                  onChange={(event) => setCustomTargetPct(Math.max(0, Number(event.target.value) || 0))}
+                  className="mt-2 w-full bg-transparent text-[16px] font-mono font-bold outline-none"
+                  style={{ color: "var(--foreground)" }}
+                />
+              </label>
+            </div>
+
+            <div className="mb-4 rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Trade Ticket
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Entry</p>
+                  <p className="mt-2 text-[16px] font-mono font-bold" style={{ color: "var(--foreground)" }}>{formatPrice(entry)}</p>
+                  <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                    {entryMode === "market" ? "Live market entry" : "Slightly better entry band"}
+                  </p>
+                </div>
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Target</p>
+                  <p className="mt-2 text-[16px] font-mono font-bold" style={{ color: "var(--bull)" }}>
+                    {isWait ? "Wait" : formatPrice(targetPrice)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                    {isWait ? "No follow-through target" : formatPct(direction * targetPct)}
+                  </p>
+                </div>
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Reward Move</p>
+                  <p className="mt-2 text-[16px] font-mono font-bold" style={{ color: "var(--foreground)" }}>
+                    {isWait ? "Wait" : formatPct(direction * targetPct)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                    Target from entry
+                  </p>
+                </div>
+                <div className="rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Target P&L</p>
+                  <p className="mt-2 text-[16px] font-mono font-bold" style={{ color: targetPnl >= 0 ? "var(--bull)" : "var(--foreground)" }}>
+                    {isWait ? "No Trade" : `${targetPnl >= 0 ? "+" : ""}${formatUsdCompact(targetPnl)}`}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                    On target hit
+                  </p>
+                </div>
+              </div>
+              {isPerps && liquidationPrice ? (
+                <div className="mt-3 rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Perps Warning</p>
+                  <p className="mt-2 text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                    Approximate liquidation pressure would begin near <span style={{ color: "var(--bear)" }}>{formatPrice(liquidationPrice)}</span>. This is a rough estimate, not an exchange quote.
+                  </p>
+                </div>
+              ) : null}
+              {isSpot ? (
+                <div className="mt-3 rounded-xl border px-3 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>Spot Note</p>
+                  <p className="mt-2 text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                    Spot execution avoids liquidation mechanics, so the edge comes from discipline around invalidation, not extra leverage.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Reasoning
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {data.signal_story.evidence.supporting_components.slice(0, 4).map((item) => (
+                  <span
+                    key={`support-${item}`}
+                    className="rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.14em] font-bold"
+                    style={{ color: "var(--bull)", background: "var(--bull-track)" }}
+                  >
+                    {item}
+                  </span>
+                ))}
+                {data.signal_story.evidence.opposing_components.slice(0, 2).map((item) => (
+                  <span
+                    key={`oppose-${item}`}
+                    className="rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.14em] font-bold"
+                    style={{ color: "var(--bear)", background: "var(--bear-track)" }}
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-4 space-y-3">
+                {rationale.map((line, index) => (
+                  <div key={`${line}-${index}`} className="flex gap-3">
+                    <span className="text-[11px] font-mono font-bold tabular-nums" style={{ color: "var(--foreground-faint)" }}>
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <p className="text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                      {line}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-[11px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
+                Supported by {supportCount}/{totalSignals} visible signal components. The plan only stays valid while that balance remains intact.
+              </p>
+            </div>
           </div>
         </div>
-
-        <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
-          <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
-            Expected Outcome
-          </p>
-          <div className="space-y-2 text-[12px] font-mono">
-            <p style={{ color: "var(--foreground-muted)" }}>Net: <span style={{ color: netPnl >= 0 ? "var(--bull)" : "var(--bear)" }}>{`${netPnl >= 0 ? "+" : ""}${formatUsdCompact(netPnl).replace("$", "$")}`}</span></p>
-            <p style={{ color: "var(--foreground-muted)" }}>Move needed: <span style={{ color: "var(--foreground)" }}>{formatPct(Math.abs(targetMove))}</span></p>
-            <p style={{ color: "var(--foreground-muted)" }}>Fees: <span style={{ color: "var(--foreground)" }}>{formatPct(feesRate)} round trip</span></p>
-          </div>
-        </div>
-
-        <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
-          <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
-            Setup Read
-          </p>
-          <div className="space-y-2 text-[12px] font-mono">
-            <p style={{ color: "var(--foreground-muted)" }}>
-              Supported by <span style={{ color: "var(--foreground)" }}>{supportCount}/{totalSignals}</span> live signals
-            </p>
-            <p style={{ color: "var(--foreground-muted)" }}>
-              {decision.conviction === "high" ? "Strong" : decision.conviction === "medium" ? "Moderate" : "Cautious"} follow-through expected
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--background)" }}>
-        <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
-          Risk Trigger
-        </p>
-        <p className="text-[12px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
-          If invalidated, expected downside could extend toward <span style={{ color: "var(--bear)" }}>{formatPct(downside)}</span>{data.signal_story.invalidations[0] ? ` · ${data.signal_story.invalidations[0]}` : ""}.
-        </p>
-      </div>
       </div>
     </>
   );
@@ -706,34 +909,88 @@ export default function Page() {
   const [activeView, setActiveView] = useState<ActiveView>("decision");
   const [proMode, setProMode] = useState(true);
   const [showTradeTester, setShowTradeTester] = useState(false);
+  const [heroChartHovered, setHeroChartHovered] = useState(false);
   const [tradeAmountUsd, setTradeAmountUsd] = useState(20);
   const [liveTradePrice, setLiveTradePrice] = useState<number | null>(null);
   const [decisions, setDecisions] = useState<DecisionAsset[] | null>(null);
   const [marketOverview, setMarketOverview] = useState<MarketOverview | null>(null);
+  const [quickTradeInputs, setQuickTradeInputs] = useState<QuickTradeInputPayload | null>(null);
+  const [quickTradeOpen, setQuickTradeOpen] = useState(false);
+  const [quickTradeLoading, setQuickTradeLoading] = useState(false);
+  const [quickTradeFetchedAt, setQuickTradeFetchedAt] = useState<string | null>(null);
+  const quickTradeRequestId = useRef(0);
 
   // Get list of available assets from decisions
   const availableAssets = decisions?.map((d) => d.asset) ?? [];
 
   useEffect(() => {
-    const fetchData = () => {
-      Promise.all([fetchLatestAssetState(), fetchMarketOverview()]).then(([rows, overview]) => {
-        if (rows.length > 0) {
-          setDecisions(rows);
-          // Auto-select first asset if current selection is not in the list
-          if (!rows.find(r => r.asset === activeAsset)) {
-            setActiveAsset(rows[0].asset);
-          }
+    let ignore = false;
+
+    const fetchData = async () => {
+      const [rows, overview] = await Promise.all([
+        fetchLatestAssetState(),
+        fetchMarketOverview(),
+      ]);
+
+      if (ignore) return;
+
+      if (rows.length > 0) {
+        setDecisions(rows);
+        if (!rows.find((r) => r.asset === activeAsset)) {
+          setActiveAsset(rows[0].asset);
         }
-        if (overview) setMarketOverview(overview);
-      });
+      }
+
+      if (overview) {
+        setMarketOverview(overview);
+      }
     };
 
     fetchData();
 
-    // Refetch every 3 seconds
-    const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchData, 10000);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
   }, [activeAsset]);
+
+  useEffect(() => {
+    if (activeAsset !== "BTC" && activeAsset !== "ETH") {
+      setQuickTradeOpen(false);
+      setQuickTradeInputs(null);
+      setQuickTradeFetchedAt(null);
+      setQuickTradeLoading(false);
+    }
+  }, [activeAsset]);
+
+  async function loadQuickTradeSnapshot() {
+    if (activeAsset !== "BTC" && activeAsset !== "ETH") return;
+
+    const requestId = ++quickTradeRequestId.current;
+    setQuickTradeLoading(true);
+    const startedAt = Date.now();
+    const payload = await fetchQuickTradeInputs(activeAsset);
+    const elapsed = Date.now() - startedAt;
+    const remaining = Math.max(0, 900 - elapsed);
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remaining));
+    }
+
+    if (quickTradeRequestId.current !== requestId) return;
+
+    setQuickTradeInputs(payload);
+    setQuickTradeFetchedAt(new Date().toISOString());
+    setQuickTradeLoading(false);
+  }
+
+  useEffect(() => {
+    if (!quickTradeOpen) return;
+
+    loadQuickTradeSnapshot();
+    const interval = setInterval(loadQuickTradeSnapshot, 300000);
+    return () => clearInterval(interval);
+  }, [quickTradeOpen, activeAsset]);
 
   const decisionData = decisions?.find((d) => d.asset === activeAsset) ?? decisions?.[0];
   const updatedAt = activeView === "decision" ? decisionData?.updated_at : marketOverview?.updated_at;
@@ -809,8 +1066,75 @@ export default function Page() {
             background: "rgba(10,10,10,0.92)",
           }}
         >
-          Test This Trade
+          Review Trade Plan
         </button>
+      ) : null}
+
+      {(activeAsset === "BTC" || activeAsset === "ETH") && !quickTradeOpen ? (
+        <button
+          type="button"
+          onClick={() => {
+            setQuickTradeOpen(true);
+            setQuickTradeInputs(null);
+            setQuickTradeFetchedAt(null);
+          }}
+          className="fixed bottom-4 left-4 z-30 rounded-full border px-4 py-3 text-[11px] font-mono uppercase tracking-[0.16em] font-bold shadow-2xl transition-colors sm:bottom-5 sm:left-5"
+          style={{
+            borderColor: B,
+            color: "var(--foreground)",
+            background: "rgba(10,10,10,0.92)",
+          }}
+        >
+          Quick Trade
+        </button>
+      ) : null}
+
+      {quickTradeOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close quick trade drawer"
+            className="fixed inset-0 z-30 bg-black/50"
+            onClick={() => setQuickTradeOpen(false)}
+          />
+          <aside
+            className="fixed left-0 top-0 z-40 h-screen w-[min(440px,100vw)] border-r shadow-2xl"
+            style={{
+              borderColor: B,
+              background: "rgba(8,8,8,0.96)",
+              backdropFilter: "blur(18px)",
+            }}
+          >
+            <div className="flex items-center justify-between border-b px-4 py-4 sm:px-5" style={{ borderColor: B }}>
+              <div>
+                <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
+                  Quick Trade
+                </p>
+                <p className="mt-1 text-[12px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                  {activeAsset} tactical engine · on-demand
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickTradeOpen(false)}
+                className="rounded-full border px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+                style={{ borderColor: B, color: "var(--foreground-faint)" }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="h-[calc(100vh-73px)] overflow-y-auto">
+              <QuickTradeModule
+                asset={activeAsset}
+                data={quickTradeInputs}
+                decision={decisionData}
+                loading={quickTradeLoading}
+                fetchedAt={quickTradeFetchedAt}
+                drawer
+              />
+            </div>
+          </aside>
+        </>
       ) : null}
 
       {!proMode ? (
@@ -820,24 +1144,37 @@ export default function Page() {
         <div>
           {/* Chart + Decision side-by-side */}
           <div
-            className="grid grid-cols-1 border-b xl:grid-cols-[minmax(0,1fr)_500px]"
+            className="relative border-b overflow-hidden"
             style={{ borderColor: B }}
+            onMouseEnter={() => {
+              if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+                setHeroChartHovered(true);
+              }
+            }}
+            onMouseLeave={() => setHeroChartHovered(false)}
           >
-            {/* Chart panel */}
-            <div
-              className="border-b xl:border-b-0 xl:border-r"
-              style={{ borderColor: B, background: "var(--background)" }}
-            >
-              <SectionLabel
-                eyebrow={`${activeAsset} / USDC`}
-                title="5m Chart"
-                meta="Last 100 candles"
+            <div className="absolute inset-0" style={{ background: "var(--background)" }}>
+              <div
+                className="absolute inset-0 scale-[1.01] opacity-50"
+                style={{
+                  filter: heroChartHovered ? "blur(2px)" : "blur(7px)",
+                  opacity: heroChartHovered ? 0.66 : 0.5,
+                  transformOrigin: "center",
+                  transition: "filter 180ms ease, opacity 180ms ease",
+                }}
+              >
+                <PriceChart asset={activeAsset} />
+              </div>
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(180deg, rgba(8,8,8,0.72) 0%, rgba(8,8,8,0.48) 32%, rgba(8,8,8,0.82) 100%)",
+                }}
               />
-              <PriceChart asset={activeAsset} />
             </div>
 
-            {/* Decision panel */}
-            <div style={{ background: "var(--surface)" }}>
+            <div className="relative z-10">
               {decisionData
                 ? <DecisionHeader data={decisionData} />
                 : <Skeleton lines={6} />}
@@ -1008,6 +1345,25 @@ export default function Page() {
             </div>
           </div>
 
+          {/* Market overlays moved from the removed Context view */}
+          <div className="border-b" style={{ borderColor: B }}>
+            <SectionLabel eyebrow="Market Overlays" title="Context" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="px-6 py-6 border-b sm:border-b-0 sm:border-r" style={{ borderColor: B }}>
+                {marketOverview?.fear_greed ? <FearGreedModule data={marketOverview.fear_greed} /> : <Skeleton lines={4} />}
+              </div>
+              <div className="px-6 py-6 border-b lg:border-b-0 sm:border-r" style={{ borderColor: B }}>
+                {marketOverview?.etf_metrics?.btc ? <EtfFlowModule asset="BTC" data={marketOverview.etf_metrics.btc} /> : <Skeleton lines={4} />}
+              </div>
+              <div className="px-6 py-6 border-b lg:border-b-0 sm:border-r" style={{ borderColor: B }}>
+                {marketOverview?.etf_metrics?.eth ? <EtfFlowModule asset="ETH" data={marketOverview.etf_metrics.eth} /> : <Skeleton lines={4} />}
+              </div>
+              <div className="px-6 py-6">
+                {marketOverview?.futures_open_interest ? <OpenInterestModule data={marketOverview.futures_open_interest} /> : <Skeleton lines={4} />}
+              </div>
+            </div>
+          </div>
+
           {/* Footer */}
           <footer
             className="px-6 py-4 flex items-center justify-between"
@@ -1027,81 +1383,10 @@ export default function Page() {
       ) : activeView === "relationship" ? (
         /* ════════════════ RELATIONSHIP VIEW ════════════════ */
         <RelationshipModule asset={activeAsset} />
-      ) : (
-        /* ════════════════ CONTEXT VIEW ════════════════ */
-        <div>
-          {/* Full-width chart */}
-          <div className="border-b" style={{ borderColor: B }}>
-            <SectionLabel
-              eyebrow={`${activeAsset} / USDC`}
-              title="5m Chart"
-              meta="Supporting Context"
-            />
-            <PriceChart asset={activeAsset} />
-          </div>
-
-          {/* 4 context modules */}
-          <div className="border-b" style={{ borderColor: B }}>
-            <SectionLabel eyebrow="Market Overlays" title="Context" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x" style={{ "--tw-divide-opacity": 1, borderColor: B } as React.CSSProperties}>
-              <div className="px-6 py-6" style={{ borderColor: B, borderRight: `1px solid ${B}` }}>
-                {marketOverview?.fear_greed ? <FearGreedModule data={marketOverview.fear_greed} /> : <Skeleton lines={4} />}
-              </div>
-              <div className="px-6 py-6" style={{ borderRight: `1px solid ${B}` }}>
-                {marketOverview?.etf_metrics?.btc ? <EtfFlowModule asset="BTC" data={marketOverview.etf_metrics.btc} /> : <Skeleton lines={4} />}
-              </div>
-              <div className="px-6 py-6" style={{ borderRight: `1px solid ${B}` }}>
-                {marketOverview?.etf_metrics?.eth ? <EtfFlowModule asset="ETH" data={marketOverview.etf_metrics.eth} /> : <Skeleton lines={4} />}
-              </div>
-              <div className="px-6 py-6">
-                {marketOverview?.futures_open_interest ? <OpenInterestModule data={marketOverview.futures_open_interest} /> : <Skeleton lines={4} />}
-              </div>
-            </div>
-          </div>
-
-          {/* Sector + Spotlight */}
-          <div
-            className="grid grid-cols-1 lg:grid-cols-2 border-b"
-            style={{ borderColor: B }}
-          >
-            {/* Sector */}
-            <div className="border-b lg:border-b-0 lg:border-r" style={{ borderColor: B }}>
-              <SectionLabel eyebrow="Market Structure" title="Sector Breadth" />
-              <div className="px-6 py-6">
-                {marketOverview?.sector_spotlight?.sector ? <SectorTable sectors={marketOverview.sector_spotlight.sector} /> : <Skeleton lines={4} />}
-              </div>
-            </div>
-
-            {/* Spotlight */}
-            <div>
-              <SectionLabel eyebrow="Narrative Flow" title="Spotlight Rotations" />
-              <div className="px-6 py-6">
-                {marketOverview?.sector_spotlight?.spotlight ? <SpotlightList spotlight={marketOverview.sector_spotlight.spotlight} /> : <Skeleton lines={4} />}
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <footer
-            className="px-6 py-4 flex items-center justify-between"
-            style={{ borderTop: `1px solid ${B}` }}
-          >
-            <span
-              className="text-[11px] font-mono uppercase tracking-[0.18em] font-semibold"
-              style={{ color: "var(--foreground-faint)" }}
-            >
-              Narralytica · Market Context Layer
-            </span>
-            <span className="text-[11px] font-mono tabular-nums font-semibold" style={{ color: "var(--foreground-faint)" }}>
-              {marketOverview?.updated_at ? new Date(marketOverview.updated_at).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }) : "—"}
-            </span>
-          </footer>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
+
+
+

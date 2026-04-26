@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
@@ -10,6 +10,15 @@ export const metadata: Metadata = {
   title: 'Narralytica — Market Context',
   description: 'Market context and decision-intelligence for BTC and ETH.',
   generator: 'v0.app',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#050505',
 }
 
 export default function RootLayout({
@@ -26,3 +35,5 @@ export default function RootLayout({
     </html>
   )
 }
+
+

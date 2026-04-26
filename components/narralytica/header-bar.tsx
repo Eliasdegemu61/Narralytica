@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export type ActiveView = "decision" | "context" | "relationship";
+export type ActiveView = "decision" | "relationship";
 
 // Asset logo mapping
 const ASSET_LOGOS: Record<string, string> = {
@@ -71,7 +71,7 @@ export function HeaderBar({
 
       {/* View tabs */}
       <div className="order-3 flex w-full items-stretch border-t md:order-none md:w-[380px] md:shrink-0 md:border-t-0" style={{ borderColor: "var(--border-subtle)" }}>
-        {(["decision", "context", "relationship"] as ActiveView[]).map((v) => {
+        {(["decision", "relationship"] as ActiveView[]).map((v) => {
           const active = activeView === v;
           const hidden = !proMode && v !== "decision";
           return (

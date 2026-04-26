@@ -22,9 +22,26 @@ export async function GET() {
     },
   });
 
+  const latestAssetStateSelect = [
+    "asset",
+    "snapshot_time_utc",
+    "reference_price",
+    "reference_price_date",
+    "price_source",
+    "overall_signal",
+    "total_score",
+    "action",
+    "market_bias",
+    "conviction",
+    "position_size_bucket",
+    "updated_at",
+    "signal_story",
+  ].join(",");
+
   const { data, error } = await supabase
     .from("latest_asset_state")
-    .select("*");
+    .select(latestAssetStateSelect)
+    .order("updated_at", { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,3 +1,5 @@
+import { createClient } from "@/lib/supabase/client";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type AssetKey =
@@ -68,6 +70,22 @@ export interface DecisionAsset {
   };
 }
 
+const LATEST_ASSET_STATE_SELECT = [
+  "asset",
+  "snapshot_time_utc",
+  "reference_price",
+  "reference_price_date",
+  "price_source",
+  "overall_signal",
+  "total_score",
+  "action",
+  "market_bias",
+  "conviction",
+  "position_size_bucket",
+  "updated_at",
+  "signal_story",
+].join(",");
+
 export interface MarketOverview {
   updated_at: string;
   fear_greed: {
@@ -105,10 +123,25 @@ export interface EngineSummary {
 
 export async function fetchLatestAssetState(): Promise<DecisionAsset[]> {
   try {
-    const res = await fetch("/api/asset-state", { cache: "no-store" });
-    if (!res.ok) return [];
-    const json = await res.json();
-    const rows: Record<string, unknown>[] = json.data ?? [];
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("latest_asset_state")
+      .select(LATEST_ASSET_STATE_SELECT)
+      .order("updated_at", { ascending: false });
+
+    if (error || !data) {
+      if (error) console.error("[v0] latest_asset_state query error:", error.message);
+      return [];
+    }
+
+    const latestByAsset = new Map<string, Record<string, unknown>>();
+    for (const row of data as Record<string, unknown>[]) {
+      const assetKey = String(row.asset ?? "").toUpperCase();
+      if (!assetKey || latestByAsset.has(assetKey)) continue;
+      latestByAsset.set(assetKey, row);
+    }
+
+    const rows = Array.from(latestByAsset.values());
 
     return rows.map((row) => {
       // Parse signal_story if it's a string
@@ -143,11 +176,19 @@ export async function fetchLatestAssetState(): Promise<DecisionAsset[]> {
 
 export async function fetchMarketOverview(): Promise<MarketOverview | null> {
   try {
-    const res = await fetch("/api/site-cache?cache_key=market_overview", { cache: "no-store" });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const row = json.data;
-    if (!row) return null;
+    const supabase = createClient();
+    const { data: row, error } = await supabase
+      .from("site_cache")
+      .select("*")
+      .eq("cache_key", "market_overview")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !row) {
+      if (error) console.error("[v0] market_overview query error:", error.message);
+      return null;
+    }
 
     // Parse payload if it's a string
     let payload = row.payload;
@@ -166,11 +207,19 @@ export async function fetchMarketOverview(): Promise<MarketOverview | null> {
 
 export async function fetchEngineSummary(): Promise<EngineSummary | null> {
   try {
-    const res = await fetch("/api/site-cache?cache_key=engine_summary", { cache: "no-store" });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const row = json.data;
-    if (!row) return null;
+    const supabase = createClient();
+    const { data: row, error } = await supabase
+      .from("site_cache")
+      .select("*")
+      .eq("cache_key", "engine_summary")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !row) {
+      if (error) console.error("[v0] engine_summary query error:", error.message);
+      return null;
+    }
 
     // Parse payload if it's a string
     let payload = row.payload;
@@ -243,11 +292,19 @@ export interface NewsCachePayload {
 export async function fetchNewsCache(asset: string): Promise<NewsCachePayload | null> {
   try {
     const cacheKey = `news_chart_${asset.toLowerCase()}`;
-    const res = await fetch(`/api/site-cache?cache_key=${cacheKey}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const row = json.data;
-    if (!row) return null;
+    const supabase = createClient();
+    const { data: row, error } = await supabase
+      .from("site_cache")
+      .select("*")
+      .eq("cache_key", cacheKey)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !row) {
+      if (error) console.error("[v0] news cache query error:", error.message);
+      return null;
+    }
 
     let payload = row.payload;
     if (typeof payload === "string") {
@@ -279,11 +336,19 @@ export interface MarketNewsCachePayload {
 
 export async function fetchMarketNewsCache(): Promise<MarketNewsCachePayload | null> {
   try {
-    const res = await fetch("/api/site-cache?cache_key=news_chart_crypto", { cache: "no-store" });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const row = json.data;
-    if (!row) return null;
+    const supabase = createClient();
+    const { data: row, error } = await supabase
+      .from("site_cache")
+      .select("*")
+      .eq("cache_key", "news_chart_crypto")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !row) {
+      if (error) console.error("[v0] market news cache query error:", error.message);
+      return null;
+    }
 
     let payload = row.payload;
     if (typeof payload === "string") {
@@ -293,6 +358,113 @@ export async function fetchMarketNewsCache(): Promise<MarketNewsCachePayload | n
     return payload as MarketNewsCachePayload;
   } catch (err) {
     console.error("[v0] fetchMarketNewsCache error:", err);
+    return null;
+  }
+}
+
+
+
+export interface QuickTradeKlineRow {
+  open_time_ms: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  base_volume: number | null;
+  quote_volume: number | null;
+  symbol: string | null;
+}
+
+export interface QuickTradeFundingRow {
+  funding_time_ms: number | null;
+  funding_rate: number | null;
+  mark_price: number | null;
+  symbol: string | null;
+}
+
+export interface QuickTradeLongShortRow {
+  timestamp_ms: number | null;
+  long_short_ratio: number | null;
+  long_account_share: number | null;
+  short_account_share: number | null;
+  symbol: string | null;
+}
+
+export interface QuickTradeOpenInterestRow {
+  timestamp_ms: number | null;
+  sum_open_interest: number | null;
+  sum_open_interest_value: number | null;
+  symbol: string | null;
+}
+
+export interface QuickTradeStrategyDefinition {
+  label: string;
+  purpose: string;
+  primary_timeframe: string;
+  confirmation_timeframe: string;
+  client_rules: Record<string, number>;
+}
+
+export interface QuickTradeInputPayload {
+  engine: string;
+  updated_at: string;
+  asset: string;
+  symbol: string;
+  market: string;
+  sodex_symbol: string;
+  server_schedule: {
+    refresh_interval_minutes: number;
+    client_max_data_age_minutes: number;
+    client_refresh_buffer_minutes: number;
+    fresh_until: string;
+    next_expected_update_at: string;
+    wait_for_next_refresh_until: string;
+    client_rule: string;
+  };
+  latest_context: {
+    reference_price: number | null;
+    reference_price_source: string | null;
+  };
+  datasets: {
+    klines: {
+      "5m": QuickTradeKlineRow[];
+      "15m": QuickTradeKlineRow[];
+      "1h": QuickTradeKlineRow[];
+    };
+    funding_rates: QuickTradeFundingRow[];
+    long_short_ratio_1h: QuickTradeLongShortRow[];
+    open_interest_5m: QuickTradeOpenInterestRow[];
+  };
+  strategy_playbook: Record<string, QuickTradeStrategyDefinition>;
+}
+
+export async function fetchQuickTradeInputs(asset: string): Promise<QuickTradeInputPayload | null> {
+  const assetKey = asset.toLowerCase();
+  if (assetKey !== "btc" && assetKey !== "eth") return null;
+
+  try {
+    const supabase = createClient();
+    const { data: row, error } = await supabase
+      .from("site_cache")
+      .select("*")
+      .eq("cache_key", `quick_trade_inputs_${assetKey}`)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !row) {
+      if (error) console.error("[v0] quick trade query error:", error.message);
+      return null;
+    }
+
+    let payload = row.payload;
+    if (typeof payload === "string") {
+      try { payload = JSON.parse(payload); } catch {}
+    }
+
+    return payload as QuickTradeInputPayload;
+  } catch (err) {
+    console.error("[v0] fetchQuickTradeInputs error:", err);
     return null;
   }
 }
