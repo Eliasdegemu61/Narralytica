@@ -12,6 +12,7 @@ import { PriceChart } from "@/components/narralytica/price-chart";
 import { RelationshipModule } from "@/components/narralytica/relationship-module";
 import { QuickTradeModule } from "@/components/narralytica/quick-trade-module";
 import { formatPrice } from "@/lib/format";
+import { buildSignalApiPayload } from "@/lib/signal-api";
 
 const B = "var(--border-subtle)";
 
@@ -113,10 +114,6 @@ function tradeTargetPercent(action: string) {
     default:
       return 0;
   }
-}
-
-function tradeFeeRate(action: string) {
-  return action === "spot_long" ? 0.002 : action === "wait" ? 0 : 0.00024;
 }
 
 function tradeLeverage(action: string) {
@@ -518,159 +515,6 @@ function TestTradeCard({
   );
 }
 
-function SimpleDecisionView({ data, asset }: { data?: DecisionAsset; asset: string }) {
-  if (!data) {
-    return <div className="px-4 py-6 sm:px-6 sm:py-8"><Skeleton lines={8} /></div>;
-  }
-
-  const decision = data.signal_story.decision_summary;
-  const evidence = data.signal_story.evidence;
-  const supportingCount = evidence.supporting_components.length;
-  const opposingCount = evidence.opposing_components.length;
-  const changePct = extractChangePercent(data);
-  const oneLineWhy = `${supportingCount > 0 ? `${evidence.supporting_components.slice(0, 2).join(" + ")} supportive` : "No strong support yet"}${opposingCount > 0 ? `, ${evidence.opposing_components[0]} slightly opposing` : ""}`;
-
-  return (
-    <div style={{ background: "var(--background)" }}>
-      <div className="border-b" style={{ borderColor: B }}>
-        <SectionLabel eyebrow="Simple Mode" title={asset} meta="Decision First" />
-
-        <div className="grid grid-cols-1 border-b lg:grid-cols-[minmax(0,0.95fr)_320px]" style={{ borderColor: B }}>
-          <div className="border-b lg:border-b-0 lg:border-r" style={{ borderColor: B, background: "var(--background)" }}>
-            <div className="border-b px-4 py-3 sm:px-6" style={{ borderColor: B, background: "var(--surface)" }}>
-              <span className="text-[10px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
-                {asset} / USDC · 5m Chart
-              </span>
-            </div>
-            <PriceChart asset={asset} />
-          </div>
-
-          <div className="px-4 py-5 sm:px-6 sm:py-6" style={{ borderColor: B, background: "var(--surface)" }}>
-            <p className="text-[11px] font-mono uppercase tracking-[0.16em] font-bold mb-4" style={{ color: "var(--foreground-dim)" }}>
-              Top
-            </p>
-            <div className="grid grid-cols-3 gap-4 lg:grid-cols-1 lg:gap-5">
-              <div>
-                <p className="text-[10px] font-mono uppercase tracking-[0.14em] mb-2" style={{ color: "var(--foreground-faint)" }}>Price</p>
-                <p className="text-[20px] font-mono font-bold leading-none sm:text-[28px]" style={{ color: "var(--foreground)" }}>
-                  {formatPrice(data.reference_price ?? 0)}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] font-mono uppercase tracking-[0.14em] mb-2" style={{ color: "var(--foreground-faint)" }}>Pair</p>
-                <p className="text-[14px] font-mono font-bold sm:text-[18px]" style={{ color: "var(--foreground)" }}>
-                  {asset} / USDC
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] font-mono uppercase tracking-[0.14em] mb-2" style={{ color: "var(--foreground-faint)" }}>Change %</p>
-                <p className="text-[14px] font-mono font-bold sm:text-[18px]" style={{ color: changePct == null ? "var(--foreground-faint)" : changePct >= 0 ? "var(--bull)" : "var(--bear)" }}>
-                  {changePct == null ? "—" : `${changePct >= 0 ? "+" : ""}${(changePct * 100).toFixed(2)}%`}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="px-4 py-6 sm:px-6 sm:py-8" style={{ background: "var(--background)" }}>
-            <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold mb-3" style={{ color: "var(--foreground-dim)" }}>
-              Big Decision
-            </p>
-            <div className="mb-6">
-              <p
-                className="text-[28px] font-sans font-semibold leading-none tracking-tight sm:text-[34px] lg:text-[42px]"
-                style={{
-                  color:
-                    decision.action === "perps_short"
-                      ? "var(--bear)"
-                      : decision.action === "wait"
-                        ? "var(--foreground)"
-                        : "var(--bull)",
-                }}
-              >
-                {actionLabel(decision.action)}
-              </p>
-            </div>
-
-            <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              {[
-                { label: "Action", value: actionMarket(decision.action) },
-                { label: "Conviction", value: decision.conviction },
-                { label: "Size", value: decision.position_size_bucket },
-                { label: "Bias", value: decision.market_bias },
-              ].map((item) => (
-                <div key={item.label} className="rounded-xl border px-4 py-3" style={{ borderColor: B, background: "var(--surface)" }}>
-                  <p className="text-[10px] font-mono uppercase tracking-[0.14em] mb-2" style={{ color: "var(--foreground-faint)" }}>
-                    {item.label}
-                  </p>
-                  <p className="text-[15px] font-mono font-bold uppercase" style={{ color: "var(--foreground)" }}>
-                    {item.value}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <p className="max-w-3xl text-[13px] font-mono leading-[1.8] mb-6" style={{ color: "var(--foreground-muted)" }}>
-              {oneLineWhy}
-            </p>
-
-            <div className="rounded-2xl border p-5 mb-5" style={{ borderColor: B, background: "var(--surface)" }}>
-              <p className="text-[11px] font-mono uppercase tracking-[0.16em] font-bold mb-4" style={{ color: "var(--foreground-dim)" }}>
-                Signal Summary
-              </p>
-              <div className="flex flex-wrap items-center gap-3 mb-4">
-                <span className="text-[13px] font-mono font-bold" style={{ color: "var(--bull)" }}>
-                  Supporting: {supportingCount}
-                </span>
-                <span className="text-[13px] font-mono font-bold" style={{ color: opposingCount > 0 ? "var(--bear)" : "var(--foreground-faint)" }}>
-                  Opposing: {opposingCount}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {evidence.supporting_components.slice(0, 4).map((item) => (
-                  <span
-                    key={`s-${item}`}
-                    className="px-2.5 py-1 text-[11px] font-mono font-semibold"
-                    style={{ color: "var(--bull)", background: "var(--bull-track)", border: "1px solid var(--bull-track)" }}
-                  >
-                    {item}
-                  </span>
-                ))}
-                {evidence.opposing_components.slice(0, 2).map((item) => (
-                  <span
-                    key={`o-${item}`}
-                    className="px-2.5 py-1 text-[11px] font-mono font-semibold"
-                    style={{ color: "var(--bear)", background: "var(--bear-track)", border: "1px solid var(--bear-track)" }}
-                  >
-                    {item}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border p-5" style={{ borderColor: B, background: "var(--surface)" }}>
-              <p className="text-[11px] font-mono uppercase tracking-[0.16em] font-bold mb-4" style={{ color: "var(--foreground-dim)" }}>
-                Invalidations
-              </p>
-              <div className="space-y-3">
-                {data.signal_story.invalidations.slice(0, 2).map((item, idx) => (
-                  <div key={item + idx} className="flex gap-3">
-                    <span className="text-[11px] font-mono font-bold tabular-nums mt-0.5" style={{ color: "var(--foreground-faint)" }}>
-                      {String(idx + 1).padStart(2, "0")}
-                    </span>
-                    <p className="text-[13px] font-mono leading-relaxed" style={{ color: "var(--foreground-muted)" }}>
-                      {item}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Skeleton({ lines = 3 }: { lines?: number }) {
   return (
     <div className="flex flex-col gap-2 py-2 animate-pulse">
@@ -720,6 +564,50 @@ function SectionLabel({ eyebrow, title, meta }: { eyebrow: string; title?: strin
           {meta}
         </span>
       )}
+    </div>
+  );
+}
+
+function SignalApiView({ data }: { data?: DecisionAsset }) {
+  const payload = data ? buildSignalApiPayload(data) : null;
+  const sampleJson = payload
+    ? JSON.stringify({ version: "v1", generated_at: new Date(payload.updated_at).getTime(), signal: payload }, null, 2)
+    : "{\n  \"version\": \"v1\",\n  \"signal\": null\n}";
+  const asset = data?.asset ?? "BTC";
+  const curlLines = [
+    "curl -X GET \\",
+    `  \"http://localhost:3000/api/signal-api?asset=${asset}\"`,
+  ];
+
+  return (
+    <div>
+      <div className="border-b" style={{ borderColor: B }}>
+        <div className="px-6 py-6">
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 border-b xl:grid-cols-[minmax(0,0.95fr)_420px]" style={{ borderColor: B }}>
+        <div className="border-b xl:border-b-0 xl:border-r" style={{ borderColor: B }}>
+          <div className="px-6 py-6">
+            <div className="rounded-2xl border p-4" style={{ borderColor: B, background: "var(--surface)" }}>
+              <pre className="overflow-x-auto text-[12px] font-mono leading-[1.7] whitespace-pre-wrap" style={{ color: "var(--foreground-muted)" }}>
+                {sampleJson}
+              </pre>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <SectionLabel eyebrow="How To Get It" title="cURL" />
+          <div className="px-6 py-6">
+            <div className="rounded-2xl border p-4" style={{ borderColor: B, background: "var(--surface)" }}>
+              <pre className="overflow-x-auto text-[12px] font-mono leading-[1.7] whitespace-pre-wrap" style={{ color: "var(--foreground-muted)" }}>
+                {curlLines.join("\n")}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -907,7 +795,6 @@ function DecisionRadar({ data }: { data: DecisionAsset }) {
 export default function Page() {
   const [activeAsset, setActiveAsset] = useState<string>("BTC");
   const [activeView, setActiveView] = useState<ActiveView>("decision");
-  const [proMode, setProMode] = useState(true);
   const [showTradeTester, setShowTradeTester] = useState(false);
   const [heroChartHovered, setHeroChartHovered] = useState(false);
   const [tradeAmountUsd, setTradeAmountUsd] = useState(20);
@@ -993,7 +880,10 @@ export default function Page() {
   }, [quickTradeOpen, activeAsset]);
 
   const decisionData = decisions?.find((d) => d.asset === activeAsset) ?? decisions?.[0];
-  const updatedAt = activeView === "decision" ? decisionData?.updated_at : marketOverview?.updated_at;
+  const updatedAt =
+    activeView === "decision" ? decisionData?.updated_at :
+    activeView === "signal-api" ? decisionData?.updated_at :
+    marketOverview?.updated_at;
 
   useEffect(() => {
     if (!decisionData) return;
@@ -1040,12 +930,10 @@ export default function Page() {
         onAssetChange={setActiveAsset}
         activeView={activeView}
         onViewChange={setActiveView}
-        proMode={proMode}
-        onProModeChange={setProMode}
         assets={availableAssets}
       />
 
-      {showTradeTester && decisionData ? (
+      {activeView === "decision" && showTradeTester && decisionData ? (
         <TestTradeCard
           data={decisionData}
           livePrice={liveTradePrice ?? decisionData.reference_price ?? 0}
@@ -1055,7 +943,7 @@ export default function Page() {
         />
       ) : null}
 
-      {!showTradeTester && decisionData ? (
+      {activeView === "decision" && !showTradeTester && decisionData ? (
         <button
           type="button"
           onClick={() => setShowTradeTester(true)}
@@ -1070,7 +958,7 @@ export default function Page() {
         </button>
       ) : null}
 
-      {(activeAsset === "BTC" || activeAsset === "ETH") && !quickTradeOpen ? (
+      {activeView === "decision" && (activeAsset === "BTC" || activeAsset === "ETH") && !quickTradeOpen ? (
         <button
           type="button"
           onClick={() => {
@@ -1082,14 +970,14 @@ export default function Page() {
           style={{
             borderColor: B,
             color: "var(--foreground)",
-            background: "rgba(10,10,10,0.92)",
+            background: "linear-gradient(180deg, rgba(10,10,10,0.96) 0%, rgba(18,18,18,0.96) 100%)",
           }}
         >
           Quick Trade
         </button>
       ) : null}
 
-      {quickTradeOpen ? (
+      {activeView === "decision" && quickTradeOpen ? (
         <>
           <button
             type="button"
@@ -1111,7 +999,7 @@ export default function Page() {
                   Quick Trade
                 </p>
                 <p className="mt-1 text-[12px] font-mono" style={{ color: "var(--foreground-muted)" }}>
-                  {activeAsset} tactical engine · on-demand
+                  {activeAsset} tactical setup
                 </p>
               </div>
               <button
@@ -1137,9 +1025,7 @@ export default function Page() {
         </>
       ) : null}
 
-      {!proMode ? (
-        <SimpleDecisionView data={decisionData} asset={activeAsset} />
-      ) : activeView === "decision" ? (
+      {activeView === "decision" ? (
         /* ════════════════ DECISION VIEW ════════════════ */
         <div>
           {/* Chart + Decision side-by-side */}
@@ -1380,6 +1266,9 @@ export default function Page() {
             </span>
           </footer>
         </div>
+      ) : activeView === "signal-api" ? (
+        /* ════════════════ SIGNAL API VIEW ════════════════ */
+        <SignalApiView data={decisionData} />
       ) : activeView === "relationship" ? (
         /* ════════════════ RELATIONSHIP VIEW ════════════════ */
         <RelationshipModule asset={activeAsset} />

@@ -1,3 +1,5 @@
+"use client";
+
 import { useMemo, useState } from "react";
 
 import { formatPrice } from "@/lib/format";
@@ -20,17 +22,24 @@ type StrategyResult = {
 type TradePlan = {
   action: "LONG" | "SHORT" | "WAIT";
   color: string;
+  track: string;
   title: string;
   reason: string;
+  confidence: number;
+  confidenceLabel: string;
+  setupState: string;
+  setupNote: string;
   lead: StrategyResult | null;
   bullishCount: number;
   bearishCount: number;
   stale: boolean;
   leverage: string;
+  entryLabel: string;
   entryLow: number;
   entryHigh: number;
   takeProfit: number;
   stopLoss: number;
+  riskReward: number | null;
 };
 
 function asNumber(value: unknown) {
@@ -286,25 +295,36 @@ function buildTradePlan(results: StrategyResult[], referencePrice: number, fetch
   let action: TradePlan["action"] = "WAIT";
   let lead: StrategyResult | null = null;
   let color = "var(--foreground)";
+  let track = "var(--surface-2)";
   let title = "No clean quick trade yet";
   let reason = `Wait ${waitWindow(age)} minutes and reopen for a sharper entry read.`;
+  let setupState = "Stand aside";
+  let setupNote = "No side has enough alignment to justify a fast trade.";
 
   if (!stale && bullish.length >= 2 && bullishScore >= 140 && bullishScore > bearishScore + 25) {
     action = "LONG";
     lead = [...bullish].sort((a, b) => b.score - a.score)[0];
     color = "var(--bull)";
+    track = "var(--bull-track)";
     title = `${lead?.label ?? "Momentum"} long setup`;
-    reason = `Bias is long right now. The best entry zone is around the band below.`;
+    reason = "Bias is long right now. The best entry zone is around the band below.";
+    setupState = "Long bias active";
+    setupNote = "Momentum and confirmation are aligned enough for a tactical long read.";
   } else if (!stale && bearish.length >= 2 && bearishScore >= 140 && bearishScore > bullishScore + 25) {
     action = "SHORT";
     lead = [...bearish].sort((a, b) => b.score - a.score)[0];
     color = "var(--bear)";
+    track = "var(--bear-track)";
     title = `${lead?.label ?? "Momentum"} short setup`;
-    reason = `Bias is short right now. The best entry zone is around the band below.`;
+    reason = "Bias is short right now. The best entry zone is around the band below.";
+    setupState = "Short bias active";
+    setupNote = "Downside pressure is the cleaner tactical side right now.";
   } else if (!stale) {
     lead = [...results].sort((a, b) => b.score - a.score)[0] ?? null;
     title = "Setup is still mixed";
     reason = lead ? `${lead.label} is the closest match, but the overall setup is not clean enough yet.` : "No fast setup is ready yet.";
+    setupState = "Mixed conditions";
+    setupNote = "One setup is close, but the engine still sees crosscurrents.";
   }
 
   const leverage =
@@ -316,27 +336,47 @@ function buildTradePlan(results: StrategyResult[], referencePrice: number, fetch
   const entryBuffer = action === "WAIT" ? 0.001 : lead?.key === "trend_pullback" ? 0.0012 : 0.0018;
   const tpPct = action === "WAIT" ? 0 : action === "LONG" ? 0.006 : -0.006;
   const slPct = action === "WAIT" ? 0 : action === "LONG" ? -0.0035 : 0.0035;
+  const leadScore = lead?.score ?? 0;
+  const confidence =
+    action === "WAIT"
+      ? Math.max(22, leadScore)
+      : Math.min(95, leadScore + Math.abs(bullishScore - bearishScore) * 0.18 + 8);
+  const confidenceLabel =
+    confidence >= 80 ? "High conviction" :
+    confidence >= 62 ? "Good alignment" :
+    confidence >= 45 ? "Developing" :
+    "Early read";
+  const riskReward = slPct !== 0 ? Math.abs(tpPct / slPct) : null;
+  const entryLow = referencePrice * (1 - entryBuffer);
+  const entryHigh = referencePrice * (1 + entryBuffer);
 
   return {
     action,
     color,
+    track,
     title,
     reason,
+    confidence,
+    confidenceLabel,
+    setupState,
+    setupNote,
     lead,
     bullishCount: bullish.length,
     bearishCount: bearish.length,
     stale,
     leverage,
-    entryLow: referencePrice * (1 - entryBuffer),
-    entryHigh: referencePrice * (1 + entryBuffer),
+    entryLabel: action === "WAIT" ? "Watch the next refresh" : `${formatPrice(entryLow)} - ${formatPrice(entryHigh)}`,
+    entryLow,
+    entryHigh,
     takeProfit: referencePrice * (1 + tpPct),
     stopLoss: referencePrice * (1 + slPct),
+    riskReward,
   };
 }
 
 function PlanStat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--surface)" }}>
+    <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
       <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
         {label}
       </p>
@@ -345,6 +385,21 @@ function PlanStat({ label, value, accent }: { label: string; value: string; acce
       </p>
     </div>
   );
+}
+
+function statusCopy(minutes: number | null, stale: boolean) {
+  if (minutes == null) return "Snapshot time unavailable";
+  if (stale) return `Snapshot is ${minutes}m old`;
+  return `Snapshot refreshed ${minutes}m ago`;
+}
+
+function pctFromReference(value: number, reference: number) {
+  if (!reference) return 0;
+  return ((value - reference) / reference) * 100;
+}
+
+function signedPctLabel(value: number) {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 export function QuickTradeModule({
@@ -368,20 +423,30 @@ export function QuickTradeModule({
     () => (data ? buildTradePlan(results, referencePrice, fetchedAt) : null),
     [data, results, referencePrice, fetchedAt],
   );
+  const snapshotAge = ageMinutes(fetchedAt);
+  const dominantScore = plan?.lead?.score ?? 0;
+  const biasTotal = Math.max(1, (plan?.bullishCount ?? 0) + (plan?.bearishCount ?? 0));
+  const longBiasPct = ((plan?.bullishCount ?? 0) / biasTotal) * 100;
+  const shortBiasPct = ((plan?.bearishCount ?? 0) / biasTotal) * 100;
+  const stopDistancePct = pctFromReference(plan?.stopLoss ?? 0, referencePrice);
+  const targetDistancePct = pctFromReference(plan?.takeProfit ?? 0, referencePrice);
 
   if (loading) {
     return (
-      <div className="px-4 py-5 sm:px-5 sm:py-6" style={{ background: "var(--background)" }}>
+      <div className="px-4 py-6 sm:px-5 sm:py-7" style={{ background: "var(--background)" }}>
         <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
-          Calculating Quick Trade
+          Quick Trade
+        </p>
+        <p className="mt-2 text-[18px] font-sans font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
+          Building tactical setup
         </p>
         <div className="mt-6 flex items-center gap-3">
-          <div className="h-2 w-2 rounded-full animate-pulse" style={{ background: "var(--bull)" }} />
-          <div className="h-2 w-2 rounded-full animate-pulse" style={{ background: "var(--foreground-faint)", animationDelay: "120ms" }} />
-          <div className="h-2 w-2 rounded-full animate-pulse" style={{ background: "var(--foreground-faint)", animationDelay: "240ms" }} />
+          <div className="h-2.5 w-2.5 rounded-full animate-pulse" style={{ background: "var(--bull)" }} />
+          <div className="h-2.5 w-2.5 rounded-full animate-pulse" style={{ background: "var(--foreground-faint)", animationDelay: "120ms" }} />
+          <div className="h-2.5 w-2.5 rounded-full animate-pulse" style={{ background: "var(--foreground-faint)", animationDelay: "240ms" }} />
         </div>
         <p className="mt-5 text-[12px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
-          Checking the latest BTC or ETH snapshot and building a fast trade read.
+          Pulling the latest {asset} snapshot and scoring the fast setups.
         </p>
       </div>
     );
@@ -389,12 +454,15 @@ export function QuickTradeModule({
 
   if (!data) {
     return (
-      <div className="px-4 py-5 sm:px-5 sm:py-6" style={{ background: "var(--background)" }}>
+      <div className="px-4 py-6 sm:px-5 sm:py-7" style={{ background: "var(--background)" }}>
         <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
           Quick Trade
         </p>
+        <p className="mt-2 text-[18px] font-sans font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
+          Waiting for a live snapshot
+        </p>
         <p className="mt-3 text-[12px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
-          Open the panel to fetch the latest tactical snapshot for {asset}.
+          Open this panel for the latest tactical read on {asset}, including entry region, stop, and setup alignment.
         </p>
       </div>
     );
@@ -405,55 +473,197 @@ export function QuickTradeModule({
   return (
     <div className="min-h-full border-b" style={{ borderColor: B, background: "var(--background)" }}>
       <div className="px-4 py-5 sm:px-5 sm:py-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
-            Quick Trade Engine
-          </span>
-          <span
-            className="rounded-full px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
-            style={{
-              color: plan.action === "LONG" ? "var(--bull)" : plan.action === "SHORT" ? "var(--bear)" : "var(--foreground)",
-              background: plan.action === "LONG" ? "var(--bull-track)" : plan.action === "SHORT" ? "var(--bear-track)" : "var(--surface-2)",
-            }}
-          >
-            {plan.action}
-          </span>
+        <div
+          className="rounded-[28px] border p-4 sm:p-5"
+          style={{
+            borderColor: B,
+            background: `linear-gradient(180deg, ${plan.track} 0%, rgba(255,255,255,0.02) 34%, rgba(255,255,255,0) 100%)`,
+            boxShadow: "0 20px 70px rgba(0,0,0,0.24)",
+          }}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
+                Quick Trade Engine
+              </p>
+              <p className="mt-2 text-[20px] font-sans font-semibold tracking-tight" style={{ color: plan.color }}>
+                {plan.title}
+              </p>
+              <p className="mt-2 max-w-2xl text-[12px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
+                {plan.setupNote}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span
+                className="rounded-full px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+                style={{ color: plan.color, background: plan.track }}
+              >
+                {plan.action}
+              </span>
+              <span
+                className="rounded-full border px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+                style={{ borderColor: B, color: plan.stale ? "var(--bear)" : "var(--foreground-faint)" }}
+              >
+                {statusCopy(snapshotAge, plan.stale)}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "rgba(0,0,0,0.18)" }}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                  Tactical Read
+                </p>
+                <p className="mt-2 text-[13px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
+                  {plan.reason}
+                </p>
+              </div>
+              <div className="min-w-[124px]">
+                <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                  <span>{plan.confidenceLabel}</span>
+                  <span style={{ color: plan.color }}>{Math.round(plan.confidence)}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
+                  <div className="h-full rounded-full" style={{ width: `${plan.confidence}%`, background: plan.color }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--surface)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Setup State
+              </p>
+              <p className="mt-2 text-[15px] font-mono font-bold" style={{ color: plan.color }}>
+                {plan.setupState}
+              </p>
+              <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                {plan.action === "WAIT" ? "Stay selective" : "Use only as a tactical read"}
+              </p>
+            </div>
+            <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--surface)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Lead Setup
+              </p>
+              <p className="mt-2 text-[15px] font-mono font-bold" style={{ color: plan.color }}>
+                {plan.lead?.label ?? "No dominant setup"}
+              </p>
+              <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                {plan.lead?.timeframe ?? "Watching multiple frames"}
+              </p>
+            </div>
+            <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--surface)" }}>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Dominant Score
+              </p>
+              <p className="mt-2 text-[15px] font-mono font-bold" style={{ color: dominantScore >= 70 ? plan.color : "var(--foreground)" }}>
+                {dominantScore}/100
+              </p>
+              <p className="mt-1 text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                {plan.bullishCount} long vs {plan.bearishCount} short
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="mt-4">
-          <p className="text-[16px] font-sans font-semibold tracking-tight sm:text-[18px]" style={{ color: plan.color }}>
-            {plan.title}
-          </p>
-          <p className="mt-3 max-w-3xl text-[13px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
-            {plan.reason}
-          </p>
+        <div className="mt-5 rounded-[28px] border p-4 sm:p-5" style={{ borderColor: B, background: "var(--surface)" }}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
+                Execution Map
+              </p>
+              <p className="mt-2 text-[16px] font-sans font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
+                {plan.action === "WAIT" ? "No fast order yet" : `${asset} quick trade plan`}
+              </p>
+            </div>
+            <span
+              className="rounded-full border px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+              style={{ borderColor: B, color: plan.color }}
+            >
+              {plan.leverage}
+            </span>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {plan.action === "WAIT" ? (
+              <>
+                <PlanStat label="Recheck Window" value={`${waitWindow(snapshotAge)} minutes`} />
+                <PlanStat label="Current Read" value="No entry yet" accent="var(--foreground)" />
+              </>
+            ) : (
+              <>
+                <PlanStat label="Entry Region" value={plan.entryLabel} />
+                <PlanStat
+                  label="Risk / Reward"
+                  value={`${plan.riskReward?.toFixed(2) ?? "0.00"}R`}
+                  accent={plan.color}
+                />
+                <PlanStat
+                  label="Take Profit"
+                  value={`${formatPrice(plan.takeProfit)} · ${signedPctLabel(targetDistancePct)}`}
+                  accent="var(--bull)"
+                />
+                <PlanStat
+                  label="Stop Loss"
+                  value={`${formatPrice(plan.stopLoss)} · ${signedPctLabel(stopDistancePct)}`}
+                  accent="var(--bear)"
+                />
+              </>
+            )}
+          </div>
+
+          <div className="mt-5 rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+                Signal Balance
+              </p>
+              <p className="text-[11px] font-mono" style={{ color: "var(--foreground-muted)" }}>
+                {plan.bullishCount} long vs {plan.bearishCount} short
+              </p>
+            </div>
+            <div className="mt-3 flex overflow-hidden rounded-full" style={{ height: "8px", background: "rgba(255,255,255,0.06)" }}>
+              <div style={{ width: `${longBiasPct}%`, background: "var(--bull)" }} />
+              <div style={{ width: `${shortBiasPct}%`, background: "var(--bear)" }} />
+            </div>
+            <div className="mt-3 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
+              <span>Long pressure {Math.round(longBiasPct)}%</span>
+              <span>Short pressure {Math.round(shortBiasPct)}%</span>
+            </div>
+          </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <PlanStat label="Recommended Leverage" value={plan.leverage} accent={plan.color} />
-          <PlanStat label="Entry Region" value={`${formatPrice(plan.entryLow)} - ${formatPrice(plan.entryHigh)}`} />
-          <PlanStat label="Take Profit" value={plan.action === "WAIT" ? "Wait" : formatPrice(plan.takeProfit)} accent="var(--bull)" />
-          <PlanStat label="Stop Loss" value={plan.action === "WAIT" ? "Wait" : formatPrice(plan.stopLoss)} accent="var(--bear)" />
-        </div>
-
-        <div className="mt-5 border-t pt-5" style={{ borderColor: B }}>
-          <button
-            type="button"
-            onClick={() => setShowReasoning((value) => !value)}
-            className="rounded-full border px-3 py-2 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
-            style={{ borderColor: B, color: "var(--foreground)" }}
-          >
-            {showReasoning ? "Hide Reasoning" : "Show Reasoning"}
-          </button>
+        <div className="mt-5 rounded-[28px] border p-4 sm:p-5" style={{ borderColor: B, background: "var(--surface)" }}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-mono uppercase tracking-[0.18em] font-bold" style={{ color: "var(--foreground-dim)" }}>
+                Breakdown
+              </p>
+              <p className="mt-2 text-[12px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
+                {plan.action === "WAIT"
+                  ? "This panel is best used as a watchlist-grade tactical read until one side takes over."
+                  : `The engine sees a ${plan.action.toLowerCase()}-leaning setup. Use the band, stop, and balance below as a compact execution framework.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowReasoning((value) => !value)}
+              className="rounded-full border px-3 py-2 text-[10px] font-mono uppercase tracking-[0.16em] font-bold"
+              style={{ borderColor: B, color: "var(--foreground)" }}
+            >
+              {showReasoning ? "Hide Logic" : "Show Logic"}
+            </button>
+          </div>
 
           {showReasoning ? (
             <div className="mt-5 space-y-4">
-              <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--surface)" }}>
+              <div className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
                 <p className="text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: "var(--foreground-faint)" }}>
-                  Signal Balance
+                  Engine Rule
                 </p>
                 <p className="mt-2 text-[12px] font-mono leading-[1.8]" style={{ color: "var(--foreground-muted)" }}>
-                  {plan.bullishCount} long setups and {plan.bearishCount} short setups are active in this read.
+                  The quick-trade read only upgrades to LONG or SHORT when multiple fast setups point the same way and that side clearly outweighs the other.
                 </p>
               </div>
 
@@ -462,7 +672,7 @@ export function QuickTradeModule({
                   const accent = result.direction === "long" ? "var(--bull)" : result.direction === "short" ? "var(--bear)" : "var(--foreground-faint)";
                   const track = result.direction === "long" ? "var(--bull-track)" : result.direction === "short" ? "var(--bear-track)" : "var(--surface-2)";
                   return (
-                    <div key={result.key} className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--surface)" }}>
+                    <div key={result.key} className="rounded-2xl border px-4 py-4" style={{ borderColor: B, background: "var(--background)" }}>
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-[11px] font-mono uppercase tracking-[0.16em] font-bold" style={{ color: "var(--foreground-dim)" }}>
                           {result.label}

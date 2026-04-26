@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export type ActiveView = "decision" | "relationship";
+export type ActiveView = "decision" | "signal-api" | "relationship";
 
 // Asset logo mapping
 const ASSET_LOGOS: Record<string, string> = {
@@ -24,8 +24,6 @@ interface HeaderBarProps {
   onAssetChange: (asset: string) => void;
   activeView: ActiveView;
   onViewChange: (view: ActiveView) => void;
-  proMode: boolean;
-  onProModeChange: (value: boolean) => void;
   assets?: string[];
 }
 
@@ -34,8 +32,6 @@ export function HeaderBar({
   onAssetChange,
   activeView,
   onViewChange,
-  proMode,
-  onProModeChange,
   assets = ["BTC", "ETH"],
 }: HeaderBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -71,29 +67,22 @@ export function HeaderBar({
 
       {/* View tabs */}
       <div className="order-3 flex w-full items-stretch border-t md:order-none md:w-[380px] md:shrink-0 md:border-t-0" style={{ borderColor: "var(--border-subtle)" }}>
-        {(["decision", "relationship"] as ActiveView[]).map((v) => {
+        {(["decision", "signal-api", "relationship"] as ActiveView[]).map((v) => {
           const active = activeView === v;
-          const hidden = !proMode && v !== "decision";
+          const label = v === "signal-api" ? "signal endpoint" : v;
           return (
             <button
               key={v}
-              onClick={() => !hidden && onViewChange(v)}
-              disabled={hidden}
-              className="relative flex flex-1 items-center justify-center px-3 py-3 text-[11px] font-mono uppercase tracking-[0.14em] border-r font-semibold transition-colors disabled:cursor-default whitespace-nowrap md:px-6 md:text-[12px]"
+              onClick={() => onViewChange(v)}
+              className="relative flex flex-1 items-center justify-center px-3 py-3 text-[11px] font-mono uppercase tracking-[0.14em] border-r font-semibold transition-colors whitespace-nowrap md:px-6 md:text-[12px]"
               style={{
                 borderColor: "var(--border-subtle)",
-                color: hidden
-                  ? "transparent"
-                  : active
-                    ? "var(--foreground)"
-                    : "var(--foreground-dim)",
-                background: active && !hidden ? "var(--surface-2)" : "transparent",
+                color: active ? "var(--foreground)" : "var(--foreground-dim)",
+                background: active ? "var(--surface-2)" : "transparent",
               }}
-              aria-hidden={hidden}
-              tabIndex={hidden ? -1 : 0}
             >
-              <span style={{ visibility: hidden ? "hidden" : "visible" }}>{v}</span>
-              {active && !hidden && (
+              <span>{label}</span>
+              {active && (
                 <span
                   className="absolute bottom-0 left-0 right-0 h-[2px]"
                   style={{ background: "var(--accent)" }}
@@ -109,35 +98,6 @@ export function HeaderBar({
 
       {/* Right cluster */}
       <div className="order-2 flex items-stretch justify-between md:order-none">
-        <button
-          type="button"
-          onClick={() => onProModeChange(!proMode)}
-          className="flex h-14 items-center gap-3 px-4 font-mono shrink-0 md:border-l md:px-5"
-          style={{ borderColor: "var(--border-subtle)" }}
-          aria-pressed={proMode}
-          title={`Pro Mode ${proMode ? "On" : "Off"}`}
-        >
-          <span className="text-[11px] uppercase tracking-[0.18em] font-semibold whitespace-nowrap" style={{ color: proMode ? "var(--foreground)" : "var(--foreground-dim)" }}>
-            Pro Mode
-          </span>
-          <span
-            className="relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors overflow-hidden"
-            style={{
-              background: "#050505",
-              borderColor: "rgba(255,255,255,0.08)",
-            }}
-          >
-            <span
-              className="absolute top-[2px] h-5 w-5 rounded-full transition-all"
-              style={{
-                left: proMode ? "18px" : "2px",
-                background: proMode ? "var(--bull)" : "#ffffff",
-                boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
-              }}
-            />
-          </span>
-        </button>
-
         {/* Asset toggle */}
         <div className="flex min-w-0 items-stretch overflow-x-auto md:overflow-visible">
           {primaryAssets.map((a) => {
